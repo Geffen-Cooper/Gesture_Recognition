@@ -1,0 +1,8 @@
+1. create a dataloader from the csvs, add preprocessing to clean data
+    -currently the sequence lengths are all 80 but we will need to
+     define a sequence start and stop for continual inference
+    -perhaps the sequence starts when a hand is detected and simply runs for 80 frames
+    -need to add the participant id into data loading so can test LOPO accuracy
+2. train a simple rnn to see if can get better than random accuracy
+    -may need to try GRU and LSTM techniques
+    -if too hard, see if can distinguish between 5 easy classes
