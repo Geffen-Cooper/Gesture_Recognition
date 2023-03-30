@@ -9,7 +9,7 @@ import numpy as np
 import re
 
 class Gestures(Dataset):
-    def __init__(self, root_dir,transform=None,train=True,test=False,subset=None):#,LOPO=True,CV_10_all=False,CV_10_per=False,folds=None,participant=None):
+    def __init__(self, root_dir,transform=None,train=True,test=False,subset=None):
         """
         Args:
             root_dir (string): directory where the csvs are
@@ -111,10 +111,32 @@ class ConvertAngles(object):
         return sample
 
 
-if __name__ == '__main__':
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        ConvertAngles()
-    ]
-)
-    ds = Gestures(root_dir='../data/nvGesture_v1', train=True, transform=transform)
+def load_nvgesture(batch_size,rand_seed):
+    root_dir = "/home/gc28692/Projects/data/nvgesture/nvGesture_v1"
+
+    tsfms = transforms.Compose([
+        transforms.ToTensor()
+        ]
+    )
+
+    
+    dataset = Gestures(root_dir,tsfms,train=True)#,subset=[0,1,2,3,4,5,6,7,9,10,11,12,13,15,17,18,21,22,23,24])
+    train_set, val_set = torch.utils.data.random_split(dataset, [950, 100])
+    test_set = Gestures(root_dir,tsfms,train=False,test=True)#,subset=[0,1,2,3,4,5,6,7,9,10,11,12,13,15,17,18,21,22,23,24])
+
+    # create the data loaders
+    train_loader = DataLoader(train_set,batch_size=batch_size,shuffle=True)
+    val_loader = DataLoader(val_set,batch_size=batch_size)
+    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size)
+
+    
+    # return test_loader
+    return (train_loader, val_loader, test_loader)
+
+# if __name__ == '__main__':
+#     transform = transforms.Compose([
+#         transforms.ToTensor(),
+#         ConvertAngles()
+#     ]
+# )
+#     ds = Gestures(root_dir='../data/nvGesture_v1', train=True, transform=transform)
