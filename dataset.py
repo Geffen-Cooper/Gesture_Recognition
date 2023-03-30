@@ -6,6 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.signal import medfilt
 import numpy as np
+import re
 
 class Gestures(Dataset):
     def __init__(self, root_dir,transform=None,train=True,test=False,subset=None):#,LOPO=True,CV_10_all=False,CV_10_per=False,folds=None,participant=None):
@@ -33,6 +34,7 @@ class Gestures(Dataset):
             subdir = "lm_test"
 
         files = os.listdir(os.path.join(root_dir,subdir))
+        files.sort(key=lambda f: int(f.split("_")[1]))
         for file in files:
             if subset != None:
                 l = int(file.split("_")[-1][:-4])
@@ -63,17 +65,21 @@ class Gestures(Dataset):
         label = self.labels[idx]
             
         # return the sample (landmark sequence (tensor)), object class (int)
-        return landmarks_seq[0], label
+        return landmarks_seq[0], label, idx
 
     def __len__(self):
         return len(self.img_paths)
 
-    def visualize_batch(self):
+    def visualize_batch(self,model=None):
         batch_size = 64
-        data_loader = DataLoader(self,batch_size)
+        data_loader = DataLoader(self,batch_size,shuffle=True)
 
         # get the first batch
-        (landmarks_seqs, labels) = next(iter(data_loader))
+        (landmarks_seqs, labels,id) = next(iter(data_loader))
+
+        if model != None:
+            out = model(landmarks_seqs)
+            pred = torch.argmax(out,dim=1)
         
         # display the batch in a grid with the img, label, idx
         rows = 8
@@ -84,9 +90,12 @@ class Gestures(Dataset):
         for i in range(rows):
             for j in range(cols):
                 idx = i*rows+j
-                text = self.class_id_list[labels[idx]]
+                if model != None:
+                    text = self.class_id_list[labels[idx]]+"\n"+str(id[idx])+"\n"+str(self.class_id_list(pred[idx]))
+                else:
+                    text = self.class_id_list[labels[idx]]+"\n"+str(id[idx])#os.path.basename(self.img_paths[id[idx]])
 
-                ax_array[i,j].imshow(torch.permute(landmarks_seqs[idx],(2,1,0)))
+                ax_array[i,j].imshow(torch.permute(landmarks_seqs[idx],(1,0)))
 
                 ax_array[i,j].title.set_text(text)
                 ax_array[i,j].set_xticks([])
