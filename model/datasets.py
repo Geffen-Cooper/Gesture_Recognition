@@ -111,8 +111,7 @@ class ConvertAngles(object):
         return sample
 
 
-def load_nvgesture(batch_size,rand_seed):
-    root_dir = "/home/gc28692/Projects/data/nvgesture/nvGesture_v1"
+def load_nvgesture(batch_size, rand_seed, root_dir="../data/nvGesture_v1"):
 
     tsfms = transforms.Compose([
         transforms.ToTensor()

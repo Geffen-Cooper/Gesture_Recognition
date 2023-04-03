@@ -44,7 +44,7 @@ class HandPoseModel(nn.Module):
         """
         Takes in a single frame (RGB)
         Args:
-            X:
+            image:
 
         Returns:
 
