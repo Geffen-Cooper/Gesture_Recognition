@@ -30,8 +30,8 @@ def train(model, train_loader, val_loader, test_loader, device, loss_fn, optimiz
         writer = SummaryWriter("runs/" + args.log_name)
         checkpoint = torch.load(args.checkpoint)
         model.load_state_dict(checkpoint['model_state_dict'])
-        print("resume from:", checkpoint['val_metric'])
-        best_val_acc = checkpoint['val_metric']
+        print("resume from:", checkpoint['val_loss'])
+        lowest_loss = checkpoint['val_loss']
 
         # Log kwargs
         for k, v in kwargs.items():
@@ -43,6 +43,7 @@ def train(model, train_loader, val_loader, test_loader, device, loss_fn, optimiz
     else:
         writer = SummaryWriter("runs/" + args.log_name)
         best_val_acc = 0
+        lowest_loss = 1e6
 
     model.train()
     model = model.to(device)
@@ -81,6 +82,7 @@ def train(model, train_loader, val_loader, test_loader, device, loss_fn, optimiz
         # scheduler2.step()
 
         if num_epochs_worse == args.ese:
+            print(f"Stopping training because accuracy did not improve after {num_epochs_worse} epochs")
             break
 
         # evaluate on the validation set
@@ -94,10 +96,12 @@ def train(model, train_loader, val_loader, test_loader, device, loss_fn, optimiz
                100. * batch_idx / len(train_loader), loss, val_acc, val_loss))
         # scheduler1.step()
 
-        if best_val_acc < val_acc:
+        # if best_val_acc < val_acc:
+        if lowest_loss > val_loss:
             print("==================== best validation metric ====================")
-            print("epoch: {}, val acc: {}".format(e, val_acc))
+            print("epoch: {}, val acc: {}, val loss: {}".format(e, val_acc, val_loss))
             best_val_acc = val_acc
+            lowest_loss = val_loss
             torch.save({
                 'epoch': e + 1,
                 'model_state_dict': model.state_dict(),
@@ -107,6 +111,7 @@ def train(model, train_loader, val_loader, test_loader, device, loss_fn, optimiz
             num_epochs_worse = 0
         # scheduler2.step()
         else:
+            print(f"WARNING: {num_epochs_worse} num epochs without improving")
             num_epochs_worse += 1
 
     # evaluate on test set
@@ -164,11 +169,12 @@ def parse_args():
     parser.add_argument('--checkpoint', type=str, default='None', help='checkpoint to resume from')
     parser.add_argument('--opt', type=str, default='Adam', help='optimizer')
     parser.add_argument('--log_name', type=str, default='default', help='checkpoint file name')
+    parser.add_argument('--root_dir', type=str, default='default', help='path to dataset directory')
     parser.add_argument('--batch-size', type=int, default=32, metavar='N',
                         help='input batch size for training (default: 32)')
     parser.add_argument('--epochs', type=int, default=100, metavar='N',
                         help='number of epochs to train')
-    parser.add_argument('--ese', type=int, default=5, metavar='N',
+    parser.add_argument('--ese', type=int, default=10, metavar='N',
                         help='early stopping epochs')
     parser.add_argument('--lr', type=float, default=0.001, metavar='LR',
                         help='learning rate')
@@ -201,7 +207,7 @@ if __name__ == "__main__":
         device = torch.device("cpu")
 
     # load datasets
-    train_loader, val_loader, test_loader = load_nvgesture(args.batch_size, args.seed, root_dir='../data/nvGesture_v1 ')
+    train_loader, val_loader, test_loader = load_nvgesture(args.batch_size, args.seed, root_dir=args.root_dir)
 
     # load the model
     model_params = dict(input_dim=63, hidden_dim=256, layer_dim=1, output_dim=25, device='cuda')

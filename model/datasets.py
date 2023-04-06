@@ -29,20 +29,38 @@ class Gestures(Dataset):
         self.labels = []
 
         if train == True:
-            subdir = "lm_train"
+            subdir1 = "lm_train_top"
+            subdir2 = "lm_train"
         elif test == True:
-            subdir = "lm_test"
+            subdir1 = "lm_test_top"
+            subdir2 = "lm_test"
 
-        files = os.listdir(os.path.join(root_dir,subdir))
-        files.sort(key=lambda f: int(f.split("_")[1]))
-        for file in files:
+        files1 = os.listdir(os.path.join(root_dir,subdir1))
+        files1.sort(key=lambda f: int(f.split("_")[1]))
+        files2 = os.listdir(os.path.join(root_dir,subdir2))
+        files2.sort(key=lambda f: int(f.split("_")[1]))
+        bad_idxs = [136,181,182,226,240,262,272,302,363,376]
+        for i,file in enumerate(files1):
+            # if i in bad_idxs:
+            #     continue
             if subset != None:
                 l = int(file.split("_")[-1][:-4])
                 if l in subset:
-                    self.img_paths.append(os.path.join(root_dir,subdir,file))
+                    self.img_paths.append(os.path.join(root_dir,subdir1,file))
                     self.labels.append(subset.index(l))
             else:
-                self.img_paths.append(os.path.join(root_dir,subdir,file))
+                self.img_paths.append(os.path.join(root_dir,subdir1,file))
+                self.labels.append(int(file.split("_")[-1][:-4]))
+        for i,file in enumerate(files2):
+            # if i in bad_idxs:
+            #     continue
+            if subset != None:
+                l = int(file.split("_")[-1][:-4])
+                if l in subset:
+                    self.img_paths.append(os.path.join(root_dir,subdir2,file))
+                    self.labels.append(subset.index(l))
+            else:
+                self.img_paths.append(os.path.join(root_dir,subdir2,file))
                 self.labels.append(int(file.split("_")[-1][:-4]))
 
     def __getitem__(self, idx):
@@ -111,7 +129,7 @@ class ConvertAngles(object):
         return sample
 
 
-def load_nvgesture(batch_size, rand_seed, root_dir="../data/nvGesture_v1"):
+def load_nvgesture(batch_size, rand_seed, root_dir):
 
     tsfms = transforms.Compose([
         transforms.ToTensor()
@@ -120,7 +138,7 @@ def load_nvgesture(batch_size, rand_seed, root_dir="../data/nvGesture_v1"):
 
     
     dataset = Gestures(root_dir,tsfms,train=True)#,subset=[0,1,2,3,4,5,6,7,9,10,11,12,13,15,17,18,21,22,23,24])
-    train_set, val_set = torch.utils.data.random_split(dataset, [950, 100])
+    train_set, val_set = torch.utils.data.random_split(dataset, [int(len(dataset)*0.9), len(dataset)-int(len(dataset)*.9)])
     test_set = Gestures(root_dir,tsfms,train=False,test=True)#,subset=[0,1,2,3,4,5,6,7,9,10,11,12,13,15,17,18,21,22,23,24])
 
     # create the data loaders
