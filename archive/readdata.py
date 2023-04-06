@@ -68,8 +68,11 @@ def load_data_from_file(example_config, sensor,image_width, image_height):
     ret = 1
     frNum = 0
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame);
-    for indx, frameIndx in enumerate(frames_to_load):    
+    for indx, frameIndx in enumerate(frames_to_load):  
+        if indx == 80:
+            break  
         ret, frame = cap.read()
+        # print(indx,frame.shape,frames_to_load)
         if ret:
             frame = cv2.resize(frame,(image_width, image_height))
             if sensor != "color":
@@ -78,7 +81,6 @@ def load_data_from_file(example_config, sensor,image_width, image_height):
             video_container[..., indx] = frame
         else:
             print("Could not load frame")
-            
     cap.release()
 
     return video_container, label
@@ -99,14 +101,31 @@ if __name__ == "__main__":
     lms_z = ["lmz"+str(i) for i in range(21)]
     col_names = lms_x + lms_y + lms_z
 
-    for sample_i in range(len(train_list)):
+    def rotx(deg):
+        return np.array([[1,0,0],
+                         [0,np.cos(np.deg2rad(deg)),-np.sin(np.deg2rad(deg))],
+                         [0,np.sin(np.deg2rad(deg)),np.cos(np.deg2rad(deg))]])
+    def roty(deg):
+        return np.array([[np.cos(np.deg2rad(deg)),0,np.sin(np.deg2rad(deg))],
+                         [0,1,0],
+                         [-np.sin(np.deg2rad(deg)),0,np.cos(np.deg2rad(deg))]])
+    def rotz(deg):
+        return np.array([[np.cos(np.deg2rad(deg)),-np.sin(np.deg2rad(deg)),0],
+                         [np.sin(np.deg2rad(deg)),np.cos(np.deg2rad(deg)),0],
+                         [0,0,1]])
+
+    
+    for sample_i in range(len(test_list)):
+    # for sample_i in range(len(train_list)):
         df = pd.DataFrame(columns=col_names)
-        data, label = load_data_from_file(example_config = train_list[3], sensor = sensors[0], image_width = 320, image_height = 240)
-        # data, label = load_data_from_file(example_config = test_list[sample_i], sensor = sensors[0], image_width = 320, image_height = 240)
+        # data, label = load_data_from_file(example_config = train_list[0], sensor = sensors[2], image_width = 320, image_height = 240)
+        
+        data, label = load_data_from_file(example_config = test_list[sample_i], sensor = sensors[2], image_width = 320, image_height = 240)
+        # data, label = load_data_from_file(example_config = train_list[sample_i], sensor = sensors[2], image_width = 320, image_height = 240)
         data = np.transpose(data,(3,0,1,2))
 
         with mp_hands.Hands(
-            model_complexity=0,
+            model_complexity=1,
             min_detection_confidence=0.5,
             min_tracking_confidence=0.5) as hands:
 
@@ -114,16 +133,33 @@ if __name__ == "__main__":
                 # To improve performance, optionally mark the image as not writeable to
                 # pass by reference.
                 image.flags.writeable = False
-                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                if image.shape[-1] == 3:
+                    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                else:
+                    image = np.stack((image[:,:,0],)*3, axis=-1)
                 results = hands.process(image)
 
                 # Draw the hand annotations on the image.
                 image.flags.writeable = True
-                image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+                if image.shape[-1] == 3:
+                    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+                # print(results.multi_hand_world_landmarks)
+                # exit()
                 if results.multi_hand_landmarks:
                     # print(results.multi_hand_landmarks[0].landmark[0])
                     # exit()
                     for hand_landmarks in results.multi_hand_landmarks:
+                        # for lm_i,lm in enumerate(hand_landmarks.landmark):
+                        #     if frame_i == 32 and (lm_i == 0 or lm_i == 8 or lm_i == 20):
+                        #         print(f"before:{frame_i},{lm_i},{np.array([lm.x,lm.y,lm.z])}")
+                        #         # print(rotx(-90))
+                        #     new_coord = rotx(90)@np.array([lm.x,lm.y,lm.z])
+                        #     hand_landmarks.landmark[lm_i].x = new_coord[0]
+                        #     hand_landmarks.landmark[lm_i].y = new_coord[1]+.3
+                        #     hand_landmarks.landmark[lm_i].z = new_coord[2]
+                        #     if frame_i == 32 and (lm_i == 0 or lm_i == 8 or lm_i ==20):
+                        #         print(f"after:{frame_i},{lm_i},{np.array([lm.x,lm.y,lm.z])}")
+                        # exit()
                         mp_drawing.draw_landmarks(
                             image,
                             hand_landmarks,
@@ -146,9 +182,10 @@ if __name__ == "__main__":
                 # cv2.imwrite('frame_'+str(i)+".jpg",image)
                 
                 # print(frame.shape)
-                cv2.imwrite("frame_"+str(frame_i)+".jpg",image)
-            # df.to_csv("lm_train/sample_"+str(sample_i)+"_label_"+str(label)+".csv",index=False)
-            exit()
-            df.to_csv("lm_test/sample_"+str(sample_i)+"_label_"+str(label)+".csv",index=False)
-            print(sample_i)
+                # cv2.imwrite("frame_"+str(frame_i)+".jpg",image)
+            # df.to_csv("_frame_"+str(sample_i)+"_label_"+str(label)+".csv",index=False)
+            df.to_csv("lm_test_top/sample_"+str(sample_i)+"_label_"+str(label)+".csv",index=False)
+            # exit()
+            # df.to_csv("lm_test/sample_"+str(sample_i)+"_label_"+str(label)+".csv",index=False)
+            print(f"sample:{sample_i} of {len(test_list)}")
     # pdb.set_trace()
