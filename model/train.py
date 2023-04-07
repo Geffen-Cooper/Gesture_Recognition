@@ -21,30 +21,69 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 np.set_printoptions(linewidth=np.nan)
 
 
-def train(model, train_loader, val_loader, test_loader, device, loss_fn, optimizer, args, **kwargs):
+def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,\
+          epochs,ese,lr,use_cuda,seed,subset):
+    
+    writer = SummaryWriter("runs/" + log_name+"_"+str(time.time()))
+    # log training parameters
+    for k,v in zip(locals().keys(),locals().values()):
+        writer.add_text(f"{k}",f"{v}")
+
+
+    # ================== parse the arguments ==================
+    torch.manual_seed(seed)
+
+    # setup device
+    use_cuda = use_cuda and torch.cuda.is_available()
+    if use_cuda:
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+
+    # load datasets
+    train_loader, val_loader, test_loader = load_nvgesture(batch_size, seed, root_dir=root_dir,subset=subset)
+
+    # load the model
+    model_params = dict(input_dim=63, hidden_dim=512, layer_dim=1, output_dim=25, device='cuda')
+    model = RNNModel(**model_params).to(device)
+    # model_params = dict(input_dim=63, num_classes=25, num_heads=4, hidden_dim=32, num_layers=2)
+    # model = TransformerClassifier(**model_params).to(device)
+
+    # set loss function
+    if loss == "CE":
+        loss_fn = torch.nn.CrossEntropyLoss()
+    else:
+        raise NotImplementedError()
+
+    # set optimizer
+    if optimizer == "SGD":
+        opt = torch.optim.SGD(params=model.parameters(), lr=lr)
+    elif optimizer == "Adam":
+        opt = torch.optim.Adam(params=model.parameters(), lr=lr)
+    else:
+        raise NotImplementedError()
 
     # continue training a model
-    if args.checkpoint != "None":
-        # init tensorboard
-        args.log_name = args.log_name + "resume"
-        writer = SummaryWriter("runs/" + args.log_name)
-        checkpoint = torch.load(args.checkpoint)
+    if from_checkpoint != None:
+        checkpoint = torch.load(from_checkpoint)
         model.load_state_dict(checkpoint['model_state_dict'])
-        print("resume from:", checkpoint['val_loss'])
-        lowest_loss = checkpoint['val_loss']
+        print("resume from:", checkpoint['val_acc'])
+        best_val_acc = checkpoint['val_acc']
 
-        # Log kwargs
-        for k, v in kwargs.items():
-            if type(v) == dict:
-                for vk, vv in v:
-                    writer.add_text(f"{k}/{vk}", str(vv))
-            else:
-                writer.add_text(f"{k}", str(v))
+        # # Log kwargs
+        # for k, v in kwargs.items():
+        #     if type(v) == dict:
+        #         for vk, vv in v:
+        #             writer.add_text(f"{k}/{vk}", str(vv))
+        #     else:
+        #         writer.add_text(f"{k}", str(v))
     else:
-        writer = SummaryWriter("runs/" + args.log_name)
         best_val_acc = 0
         lowest_loss = 1e6
 
+
+
+    # ================== training loop ==================
     model.train()
     model = model.to(device)
     batch_iter = 0
@@ -52,36 +91,36 @@ def train(model, train_loader, val_loader, test_loader, device, loss_fn, optimiz
     # how many epochs the validation loss did not decrease, 
     # used for early stopping
     num_epochs_worse = 0
-    for e in range(args.epochs):
-        if num_epochs_worse == args.ese:
+    for e in range(epochs):
+        if num_epochs_worse == ese:
             break
         for batch_idx, (data, target, id) in enumerate(train_loader):
             # stop training, run on the test set
-            if num_epochs_worse == args.ese:
+            if num_epochs_worse == ese:
                 break
 
             data, target = data.to(device), target.to(device)
 
-            optimizer.zero_grad()
+            opt.zero_grad()
             model.train()
 
             output = model(data)
 
-            loss = loss_fn(output, target)
-            writer.add_scalar("Metric/train_" + args.loss, loss, batch_iter)
-            loss.backward()
-            optimizer.step()
+            train_loss = loss_fn(output, target)
+            writer.add_scalar("Metric/train_" + loss, train_loss, batch_iter)
+            train_loss.backward()
+            opt.step()
 
             if (batch_iter % 10) == 0:
                 print('Train Epoch: {} [{}/{} ({:.0f}%)] train loss: {:.3f}'.format(
                     e, batch_idx * len(data), len(train_loader.dataset),
-                       100. * batch_idx / len(train_loader), loss))  # , scheduler1.get_last_lr()[0]))
+                       100. * batch_idx / len(train_loader), train_loss))  # , scheduler1.get_last_lr()[0]))
             # if batch_idx > 0:
             #     scheduler1.step()
             batch_iter += 1
         # scheduler2.step()
 
-        if num_epochs_worse == args.ese:
+        if num_epochs_worse == ese:
             print(f"Stopping training because accuracy did not improve after {num_epochs_worse} epochs")
             break
 
@@ -93,11 +132,11 @@ def train(model, train_loader, val_loader, test_loader, device, loss_fn, optimiz
 
         print('Train Epoch: {} [{}/{} ({:.0f}%)] train loss: {:.3f}, val acc: {:.3f}, val loss: {:.3f}'.format(
             e, batch_idx * len(data), len(train_loader.dataset),
-               100. * batch_idx / len(train_loader), loss, val_acc, val_loss))
+               100. * batch_idx / len(train_loader), train_loss, val_acc, val_loss))
         # scheduler1.step()
 
-        # if best_val_acc < val_acc:
-        if lowest_loss > val_loss:
+        if best_val_acc < val_acc:
+        # if lowest_loss > val_loss:
             print("==================== best validation metric ====================")
             print("epoch: {}, val acc: {}, val loss: {}".format(e, val_acc, val_loss))
             best_val_acc = val_acc
@@ -107,7 +146,7 @@ def train(model, train_loader, val_loader, test_loader, device, loss_fn, optimiz
                 'model_state_dict': model.state_dict(),
                 'val_acc': val_acc,
                 'val_loss': val_loss,
-            }, 'models/' + args.log_name + '.pth')
+            }, 'models/' + log_name + '.pth')
             num_epochs_worse = 0
         # scheduler2.step()
         else:
@@ -120,12 +159,14 @@ def train(model, train_loader, val_loader, test_loader, device, loss_fn, optimiz
 
     # load the best model
     # model = RNNModel(63, 256, 1, 25, 'cuda')
-    model.load_state_dict(torch.load('models/' + args.log_name + '.pth')['model_state_dict'])
+    model.load_state_dict(torch.load('models/' + log_name + '.pth')['model_state_dict'])
     model.eval()
     test_acc, test_loss = validate(model, test_loader, device, loss_fn)
 
     print('test acc: {:.3f}, test loss: {:.3f}'.format(
         test_acc, test_loss))
+    writer.add_scalar("Metric/test_acc", test_acc, e)
+    writer.add_text("test_accuracy",f"{test_acc}")
 
 
 def validate(model, val_loader, device, loss_fn):
@@ -135,8 +176,8 @@ def validate(model, val_loader, device, loss_fn):
     val_loss = 0
     num_correct = 0
     total = 0
-    preds = torch.zeros(len(test_loader.dataset))
-    gt = torch.zeros(len(test_loader.dataset))
+    preds = torch.zeros(len(val_loader.dataset))
+    gt = torch.zeros(len(val_loader.dataset))
 
     with torch.no_grad():
         i = 0
@@ -148,8 +189,8 @@ def validate(model, val_loader, device, loss_fn):
             total += len(target)
             i += 1
 
-            preds[idx * test_loader.batch_size:idx * test_loader.batch_size + len(target)] = torch.argmax(out, dim=1)
-            gt[idx * test_loader.batch_size:idx * test_loader.batch_size + len(target)] = target
+            preds[idx * val_loader.batch_size:idx * val_loader.batch_size + len(target)] = torch.argmax(out, dim=1)
+            gt[idx * val_loader.batch_size:idx * val_loader.batch_size + len(target)] = target
 
         # Compute loss and accuracy
         val_loss /= i
@@ -160,73 +201,26 @@ def validate(model, val_loader, device, loss_fn):
         return val_acc, val_loss
 
 
-# ===================================== Command Line Arguments =====================================
-def parse_args():
-    parser = argparse.ArgumentParser(description="Training and Evaluation")
-
-    # logging details
-    parser.add_argument('--loss', type=str, default='CE', help='loss function')
-    parser.add_argument('--checkpoint', type=str, default='None', help='checkpoint to resume from')
-    parser.add_argument('--opt', type=str, default='Adam', help='optimizer')
-    parser.add_argument('--log_name', type=str, default='default', help='checkpoint file name')
-    parser.add_argument('--root_dir', type=str, default='default', help='path to dataset directory')
-    parser.add_argument('--batch-size', type=int, default=32, metavar='N',
-                        help='input batch size for training (default: 32)')
-    parser.add_argument('--epochs', type=int, default=100, metavar='N',
-                        help='number of epochs to train')
-    parser.add_argument('--ese', type=int, default=10, metavar='N',
-                        help='early stopping epochs')
-    parser.add_argument('--lr', type=float, default=0.001, metavar='LR',
-                        help='learning rate')
-    parser.add_argument('--no-cuda', action='store_true', default=False,
-                        help='disables CUDA training')
-    parser.add_argument('--seed', type=int, default=1, metavar='S',
-                        help='random seed (default: 1)')
-    parser.add_argument('--log-interval', type=int, default=100, metavar='N',
-                        help='how many batches to wait before logging training status')
-
-    args = parser.parse_args()
-    print(args)
-
-    return args
-
-
 # ===================================== Main =====================================
 if __name__ == "__main__":
+    # training parameters
+    losses = ["CE"]
+    from_checkpoint = [None]
+    opts = ["Adam","SGD"]
+    log_name = ["baseline_"]
+    root_dirs = ["../csvs/front","../csvs/top"]
+    batch_sizes = [32,8,16,64]
+    epochs = [100]
+    ese = [20]
+    lr = [0.001,0.01]
+    use_cuda = [True,False]
+    seed = [42]
+    subsets = [list(np.arange(25)),[0,2,4,6,8,10,12,14,16,18,20,22,24]]
 
-    # get arguments
-    args = parse_args()
+    for root_dir in root_dirs:
+        train_params = {'loss':losses[0],'from_checkpoint':from_checkpoint[0],\
+                        'optimizer':opts[0],'log_name':log_name[0]+os.path.basename(root_dir),'root_dir':root_dir,\
+                        'batch_size':batch_sizes[0],'epochs':epochs[0],'ese':ese[0],'lr':lr[0],\
+                        'use_cuda':use_cuda[0],'seed':seed[0],'subset':subsets[1]}
 
-    # torch.manual_seed(args.seed)
-
-    # setup device
-    use_cuda = not args.no_cuda and torch.cuda.is_available()
-    if use_cuda:
-        device = torch.device("cuda")
-    else:
-        device = torch.device("cpu")
-
-    # load datasets
-    train_loader, val_loader, test_loader = load_nvgesture(args.batch_size, args.seed, root_dir=args.root_dir)
-
-    # load the model
-    model_params = dict(input_dim=63, hidden_dim=256, layer_dim=1, output_dim=25, device='cuda')
-    model = RNNModel(**model_params).to(device)
-    # model_params = dict(input_dim=63, num_classes=25, num_heads=4, hidden_dim=32, num_layers=2)
-    # model = TransformerClassifier(**model_params).to(device)
-
-    # set loss function
-    if args.loss == "CE":
-        loss = torch.nn.CrossEntropyLoss()
-    else:
-        raise NotImplementedError()
-
-    # set optimizer
-    if args.opt == "SGD":
-        opt = torch.optim.SGD(params=model.parameters(), lr=args.lr)
-    elif args.opt == "Adam":
-        opt = torch.optim.Adam(params=model.parameters(), lr=args.lr)
-    else:
-        raise NotImplementedError()
-
-    train(model, train_loader, val_loader, test_loader, device, loss, opt, args, model_params=model_params)
+        train(**train_params)
