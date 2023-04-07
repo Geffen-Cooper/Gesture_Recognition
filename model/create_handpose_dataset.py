@@ -1,3 +1,8 @@
+import itertools
+import os
+import random
+import string
+import time
 from pathlib import Path
 
 import cv2
@@ -5,19 +10,24 @@ import mediapipe as mp
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from itertools import product
+import multiprocessing
+import json
 
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
 mp_hands = mp.solutions.hands
 
 
-def load_split_nvgesture(file_with_split='./nvgesture_train_correct.lst', list_split=list()):
+def load_split_nvgesture(file_with_split='./nvgesture_train_correct.lst'):
+    list_split = []
+
     params_dictionary = dict()
     with open(file_with_split, 'rb') as f:
         dict_name = file_with_split[file_with_split.rfind('/') + 1:]
         dict_name = dict_name[:dict_name.find('_')]
 
-        for line in f:
+        for idx, line in enumerate(f):
             params = line.decode().split(' ')
             params_dictionary = dict()
 
@@ -103,37 +113,45 @@ def equalize_hist(frame, clahe):
         raise NotImplementedError("Frame should be 3-channel")
 
 
-def create_handpose_dataset(output_dir, sensor, use_clahe, lm_type, video_mode,  create_train=True, create_test=True, nvgesture_path="../data/nvGesture_v1", train_list_path='../data/nvGesture_v1/nvgesture_train_correct_cvpr2016.lst', test_list_path='../data/nvGesture_v1/nvgesture_test_correct_cvpr2016.lst'):
+def create_handpose_dataset(params):
     """
     ############## Example Params ##################
-    NVGESTURE_PATH = "../data/nvGesture_v1/"
-    TEST_LIST_PATH = "../data/nvGesture_v1/nvgesture_test_correct_cvpr2016.lst"
-    TRAIN_LIST_PATH = "../data/nvGesture_v1/nvgesture_train_correct_cvpr2016.lst"
-    SENSOR = "color"
-    USE_CLAHE = True
-    CREATE_TRAIN = True
-    CREATE_TEST = True
-    TYPE = "WORLD+"
-    VIDEO_MODE = False
-    OUTPUT_DIR = '../data/ds1'
+    params = {
+        'nvgesture_path': "../data/nvGesture_v1/",
+        'test_list_path': "../data/nvGesture_v1/nvgesture_test_correct_cvpr2016.lst",
+        'train_list_path': "../data/nvGesture_v1/nvgesture_train_correct_cvpr2016.lst",
+        'sensor': "color",
+        'use_clahe': True,
+        'create_train': True,
+        'create_test': True,
+        'lm_type': "WORLD+",
+        'video_mode': False,
+        'output_dir': '../data/ds1',
+        'resolution_method': "INTERPOLATE"
+    }
     ########################################
     """
     ############## Params ##################
-    NVGESTURE_PATH = nvgesture_path
-    TEST_LIST_PATH = test_list_path
-    TRAIN_LIST_PATH = train_list_path
-    SENSOR = sensor
-    USE_CLAHE = use_clahe
-    CREATE_TRAIN = create_train
-    CREATE_TEST = create_test
-    TYPE = lm_type
-    VIDEO_MODE = video_mode
-    OUTPUT_DIR = output_dir
+    NVGESTURE_PATH = params['nvgesture_path']
+    TEST_LIST_PATH = params['test_list_path']
+    TRAIN_LIST_PATH = params['train_list_path']
+    PROGRESS_FILE = params['progress_file']
+    SENSOR = params['sensor']
+    USE_CLAHE = params['use_clahe']
+    CREATE_TRAIN = params.get('create_train', True)
+    CREATE_TEST = params.get('create_test', True)
+    TYPE = params['lm_type']
+    VIDEO_MODE = params['video_mode']
+    OUTPUT_DIR = params['output_dir']
+    RESOLUTION_METHOD = params['resolution_method']
     ########################################
+
     sensors = ["color", "depth", "duo_left", "duo_right", "duo_disparity"]
     if SENSOR not in set(sensors):
         raise NotImplementedError("Invalid argument")
     if TYPE not in {"WORLD", "WORLD+", "NORMAL"}:
+        raise NotImplementedError("Invalid Argument")
+    if RESOLUTION_METHOD not in {"INTERPOLATE", "FIRST", "ZERO"}:
         raise NotImplementedError("Invalid Argument")
 
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
@@ -186,37 +204,124 @@ def create_handpose_dataset(output_dir, sensor, use_clahe, lm_type, video_mode, 
                     if results.multi_hand_landmarks:
 
                         # Should only be one hand
+                        hand_to_use = 0
                         if len(results.multi_hand_landmarks) > 1:
-                            raise NotImplementedError("More than one hand detected!")
+                            print(f"More than one hand in frame: {frame_i} for {lst[sample_i]}")
 
-                        # Select normal or world landmarks
-                        if TYPE == "NORMAL":
-                            hand_landmarks = results.multi_hand_landmarks[0]
-                            lm_list_x, lm_list_y, lm_list_z = [], [], []
-                            TO_SKIP = {}
-                        elif TYPE == "WORLD":
-                            hand_landmarks = results.multi_hand_world_landmarks[0]
-                            lm_list_x, lm_list_y, lm_list_z = [], [], []
-                            TO_SKIP = {}
-                        elif TYPE == "WORLD+":
-                            hand_landmarks = results.multi_hand_world_landmarks[0]
-                            wrist_lm = results.multi_hand_landmarks[0].landmark[mp_hands.HandLandmark.WRIST]
-                            lm_list_x, lm_list_y, lm_list_z = [wrist_lm.x], [wrist_lm.y], [wrist_lm.z]
-                            TO_SKIP = {mp_hands.HandLandmark.PINKY_DIP}
+                            if RESOLUTION_METHOD == "FIRST":
+                                hand_to_use = 0
+                            elif RESOLUTION_METHOD == "INTERPOLATE":
+                                hand_to_use = -1
+                            elif RESOLUTION_METHOD == "ZERO":
+                                hand_to_use = -1
+                            else:
+                                raise NotImplementedError()
+
+                        if hand_to_use >= 0:
+                            # Select normal or world landmarks
+                            if TYPE == "NORMAL":
+                                hand_landmarks = results.multi_hand_landmarks[hand_to_use]
+                                lm_list_x, lm_list_y, lm_list_z = [], [], []
+                                TO_SKIP = {}
+                            elif TYPE == "WORLD":
+                                hand_landmarks = results.multi_hand_world_landmarks[hand_to_use]
+                                lm_list_x, lm_list_y, lm_list_z = [], [], []
+                                TO_SKIP = {}
+                            elif TYPE == "WORLD+":
+                                hand_landmarks = results.multi_hand_world_landmarks[hand_to_use]
+                                wrist_lm = results.multi_hand_landmarks[hand_to_use].landmark[mp_hands.HandLandmark.WRIST]
+                                lm_list_x, lm_list_y, lm_list_z = [wrist_lm.x], [wrist_lm.y], [wrist_lm.z]
+                                TO_SKIP = {mp_hands.HandLandmark.PINKY_DIP}
 
 
-                        for lm_idx, lm in enumerate(hand_landmarks.landmark):
-                            if lm_idx in TO_SKIP:
-                                continue
-                            lm_list_x.append(lm.x)
-                            lm_list_y.append(lm.y)
-                            lm_list_z.append(lm.z)
-                        df.loc[len(df.index)] = lm_list_x + lm_list_y + lm_list_z
+                            for lm_idx, lm in enumerate(hand_landmarks.landmark):
+                                if lm_idx in TO_SKIP:
+                                    continue
+                                lm_list_x.append(lm.x)
+                                lm_list_y.append(lm.y)
+                                lm_list_z.append(lm.z)
+                            df.loc[len(df.index)] = lm_list_x + lm_list_y + lm_list_z
+                        else:
+                            if RESOLUTION_METHOD == "FIRST":
+                                raise Exception("Shouldn't get here")
+                            elif RESOLUTION_METHOD == "INTERPOLATE":
+                                df.loc[len(df.index)] = [float('nan') for j in range(63)]
+                            elif RESOLUTION_METHOD == "ZERO":
+                                df.loc[len(df.index)] = [0 for j in range(63)]
+                            else:
+                                raise NotImplementedError()
                     else:
                         df.loc[len(df.index)] = [0 for j in range(63)]
+
+                # Fill NA
+                if RESOLUTION_METHOD == "INTERPOLATE":
+                    df = df.interpolate(method='linear')
 
                 Path(out_path).mkdir(parents=True, exist_ok=True)
                 df.to_csv(out_path / Path("sample_" + str(sample_i) + "_label_" + str(label) + ".csv"), index=False)
 
+    # Save Progress
+    if Path(PROGRESS_FILE).is_file():
+        with open(PROGRESS_FILE, 'r') as f:
+            finished_params = json.load(fp=f)
+            finished_params.append(params)
+    else:
+        finished_params = [params]
+
+    with open(PROGRESS_FILE, 'w') as f:
+        json.dump(finished_params, fp=f)
+
 if __name__ == "__main__":
-    create_handpose_dataset(output_dir="../data/ds1", sensor="color", use_clahe=True, lm_type="WORLD+", video_mode=False)
+    def sanitize_path_string(path_string):
+        # sanitize the name to remove any invalid characters
+        valid_chars = set("\\/-_.() %s%s" % (string.ascii_letters, string.digits))
+        sanitized_name = "".join(c if c in valid_chars else "_" for c in path_string)
+
+        # return the sanitized path with the sanitized name
+        return sanitized_name
+
+
+    ###################
+    # Create datasets #
+    ###################
+
+    FORCE_OVERWRITE = False
+    progress_file = '../csvs/progress.txt'
+
+    lm_types = ["NORMAL", "WORLD+", "WORLD"]
+    sensors = ["color", "duo_left"]
+    use_clahes = [True, False]
+    video_modes = [True, False]
+    resolution_method = ["INTERPOLATE", "FIRST", "ZERO"]
+
+    tasks_queue = []
+
+    for i, combination in tqdm(enumerate(product(lm_types, sensors, use_clahes, video_modes, resolution_method)), desc="Dataset", unit="dataset"):
+        tqdm.write(f"{i}, {dict(lm_type=combination[0], sensor=combination[1], use_clahe=combination[2],  video_mode=combination[3], resolution_method=combination[4])}")
+
+        lm_type_short = combination[0].replace("WORLD+", "Wp").replace("WORLD", "W").replace("NORMAL", "N")
+        lm_type_str = f"L{lm_type_short.lower()}"
+        sensor_str = f"S{combination[1][0].lower()}"
+        use_clahe_str = f"C{int(combination[2])}"
+        video_mode_str = f"V{int(combination[3])}"
+        resolution_method_str = f"R{combination[4][0].lower()}"
+
+        out_dir = sanitize_path_string(f"../csvs/ds_{lm_type_str}_{sensor_str}_{use_clahe_str}_{video_mode_str}_{resolution_method_str}")
+        task = dict(output_dir=out_dir, lm_type=combination[0], sensor=combination[1], use_clahe=combination[2],  video_mode=combination[3], resolution_method=combination[4], nvgesture_path="../data/nvGesture_v1/", test_list_path="../data/nvGesture_v1/nvgesture_test_correct_cvpr2016.lst", train_list_path="../data/nvGesture_v1/nvgesture_train_correct_cvpr2016.lst", progress_file=progress_file)
+
+        if not FORCE_OVERWRITE:
+            if Path(progress_file).is_file():
+                with open(progress_file, 'r') as f:
+                    finished_params = json.load(fp=f)
+            else:
+                finished_params = []
+
+            if task in finished_params:
+                print(f"Skipping {out_dir} since it is complete...")
+                continue
+
+        tasks_queue.append(task)
+
+    # Parallelize the loop using multiprocessing
+    with multiprocessing.Pool(processes=8) as p:
+        p.map(create_handpose_dataset, tasks_queue)
