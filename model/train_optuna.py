@@ -89,7 +89,7 @@ if __name__ == '__main__':
     database = "db1"
     ######################
 
-    STUDY_NAME = "actual_actual_initial_study_v3"
+    STUDY_NAME = "actual_actual_initial_study_v4"
 
     storage = optuna.storages.RDBStorage(
         # url="sqlite:///:memory:",
