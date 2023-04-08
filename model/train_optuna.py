@@ -23,7 +23,7 @@ def suggest_params(trial: optuna.Trial):
         model_hidden_dim_size_trans = trial.suggest_int("model_hidden_dim_size_trans_multiplier", low=4, high=16) * 4
 
     # Training
-    save_model_ckpt = False
+    save_model_ckpt = True
     loss = "CE"
     from_checkpoint = None
     epochs = 100
