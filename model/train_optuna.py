@@ -43,7 +43,7 @@ def suggest_params(trial: optuna.Trial):
     sensor = trial.suggest_categorical("sensor", ['c', 'd'])
     use_clahe = trial.suggest_categorical("use_clahe", [0, 1])
     video_mode = 0
-    resolution_method = trial.suggest_categorical("resolution_method", ['i', 'z', 'f'])
+    resolution_method = trial.suggest_categorical("resolution_method", ['z', 'f'])  # ['i', 'z', 'f']
     median_filter = trial.suggest_categorical("median_filter", [True, False])
 
     if lm_type == 'wp':
