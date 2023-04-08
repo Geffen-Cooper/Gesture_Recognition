@@ -5,6 +5,11 @@
 '''
 
 import argparse
+import glob
+import random
+import re
+from pathlib import Path
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -17,21 +22,26 @@ from datasets import *
 from models import *
 import time
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+import optuna
 
 np.set_printoptions(linewidth=np.nan)
 
 
-def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,\
-          epochs,ese,lr,use_cuda,seed,subset):
-    
+def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,epochs,ese,lr,use_cuda,seed,subset, median_filter, augment_angles,
+          model_type, model_hidden_dim_size_rnn, model_hidden_dim_size_trans, save_model_ckpt):
+
     writer = SummaryWriter("runs/" + log_name+"_"+str(time.time()))
     # log training parameters
+    print("===========================================")
     for k,v in zip(locals().keys(),locals().values()):
-        writer.add_text(f"{k}",f"{v}")
-
+        writer.add_text(f"locals/{k}", f"{v}")
+        print(f"locals/{k}", f"{v}")
+    print("===========================================")
 
     # ================== parse the arguments ==================
     torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
 
     # setup device
     use_cuda = use_cuda and torch.cuda.is_available()
@@ -41,13 +51,15 @@ def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,\
         device = torch.device("cpu")
 
     # load datasets
-    train_loader, val_loader, test_loader = load_nvgesture(batch_size, seed, root_dir=root_dir,subset=subset)
+    train_loader, val_loader, test_loader = load_nvgesture(batch_size, seed, root_dir=root_dir,subset=subset, median_filter=median_filter, augment_angles=augment_angles)
 
     # load the model
-    model_params = dict(input_dim=63, hidden_dim=512, layer_dim=1, output_dim=25, device='cuda')
-    model = RNNModel(**model_params).to(device)
-    # model_params = dict(input_dim=63, num_classes=25, num_heads=4, hidden_dim=32, num_layers=2)
-    # model = TransformerClassifier(**model_params).to(device)
+    if model_type == "RNN":
+        model_params = dict(input_dim=63, hidden_dim=model_hidden_dim_size_rnn, layer_dim=1, output_dim=25, device='cuda')
+        model = RNNModel(**model_params).to(device)
+    else:
+        model_params = dict(input_dim=63, num_classes=25, num_heads=4, hidden_dim=model_hidden_dim_size_trans, num_layers=2)
+        model = TransformerClassifier(**model_params).to(device)
 
     # set loss function
     if loss == "CE":
@@ -94,7 +106,7 @@ def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,\
     for e in range(epochs):
         if num_epochs_worse == ese:
             break
-        for batch_idx, (data, target, id) in enumerate(train_loader):
+        for batch_idx, (data, target, _id) in enumerate(train_loader):
             # stop training, run on the test set
             if num_epochs_worse == ese:
                 break
@@ -114,7 +126,7 @@ def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,\
             if (batch_iter % 10) == 0:
                 print('Train Epoch: {} [{}/{} ({:.0f}%)] train loss: {:.3f}'.format(
                     e, batch_idx * len(data), len(train_loader.dataset),
-                       100. * batch_idx / len(train_loader), train_loss))  # , scheduler1.get_last_lr()[0]))
+                       100.0 * batch_idx / len(train_loader), train_loss))  # , scheduler1.get_last_lr()[0]))
             # if batch_idx > 0:
             #     scheduler1.step()
             batch_iter += 1
@@ -141,12 +153,13 @@ def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,\
             print("epoch: {}, val acc: {}, val loss: {}".format(e, val_acc, val_loss))
             best_val_acc = val_acc
             lowest_loss = val_loss
-            torch.save({
-                'epoch': e + 1,
-                'model_state_dict': model.state_dict(),
-                'val_acc': val_acc,
-                'val_loss': val_loss,
-            }, 'models/' + log_name + '.pth')
+            if save_model_ckpt:
+                torch.save({
+                    'epoch': e + 1,
+                    'model_state_dict': model.state_dict(),
+                    'val_acc': val_acc,
+                    'val_loss': val_loss,
+                }, 'models/' + log_name + '.pth')
             num_epochs_worse = 0
         # scheduler2.step()
         else:

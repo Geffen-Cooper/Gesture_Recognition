@@ -174,7 +174,7 @@ def create_handpose_dataset(params):
         output_dirs.append(Path(OUTPUT_DIR) / Path('lm_test/'))
 
     for lst, out_path in zip(lsts_to_run, output_dirs):
-        for sample_i in tqdm(range(len(lst)), desc="Sample"):
+        for sample_i in tqdm(range(len(lst)), desc=f"{Path(OUTPUT_DIR).stem}/{Path(out_path).stem}"):
             df = pd.DataFrame(columns=col_names)
             video, label = load_video_as_array(example_config=lst[sample_i], sensor=SENSOR, image_width=320, image_height=240, nvGesture_path=NVGESTURE_PATH)
 
