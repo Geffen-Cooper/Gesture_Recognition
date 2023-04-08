@@ -44,6 +44,9 @@ def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,epochs,ese
     np.random.seed(seed)
     random.seed(seed)
 
+    # Checkpoint path
+    checkpoint_path = 'models/' + log_name + '.pth'
+
     # setup device
     use_cuda = use_cuda and torch.cuda.is_available()
     if use_cuda:
@@ -154,13 +157,12 @@ def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,epochs,ese
             print("epoch: {}, val acc: {}, val loss: {}".format(e, val_acc, val_loss))
             best_val_acc = val_acc
             lowest_loss = val_loss
-            if save_model_ckpt:
-                torch.save({
-                    'epoch': e + 1,
-                    'model_state_dict': model.state_dict(),
-                    'val_acc': val_acc,
-                    'val_loss': val_loss,
-                }, 'models/' + log_name + '.pth')
+            torch.save({
+                'epoch': e + 1,
+                'model_state_dict': model.state_dict(),
+                'val_acc': val_acc,
+                'val_loss': val_loss,
+            }, checkpoint_path)
             num_epochs_worse = 0
         # scheduler2.step()
         else:
@@ -173,14 +175,18 @@ def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,epochs,ese
 
     # load the best model
     # model = RNNModel(63, 256, 1, 25, 'cuda')
-    model.load_state_dict(torch.load('models/' + log_name + '.pth')['model_state_dict'])
+    model.load_state_dict(torch.load(checkpoint_path)['model_state_dict'])
     model.eval()
     test_acc, test_loss = validate(model, test_loader, device, loss_fn)
 
-    print('test acc: {:.3f}, test loss: {:.3f}'.format(
-        test_acc, test_loss))
+    print('test acc: {:.3f}, test loss: {:.3f}'.format(test_acc, test_loss))
     writer.add_scalar("Metric/test_acc", test_acc, e)
     writer.add_text("test_accuracy",f"{test_acc}")
+
+    if not save_model_ckpt:
+        os.remove(checkpoint_path)
+
+    return test_acc, test_loss
 
 
 def validate(model, val_loader, device, loss_fn):
