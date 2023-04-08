@@ -6,6 +6,7 @@
 
 import argparse
 import glob
+import math
 import random
 import re
 from pathlib import Path
@@ -116,7 +117,7 @@ def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,epochs,ese
             opt.zero_grad()
             model.train()
 
-            output = model(data)
+            output = model(data.float())
 
             train_loss = loss_fn(output, target)
             writer.add_scalar("Metric/train_" + loss, train_loss, batch_iter)
@@ -196,7 +197,7 @@ def validate(model, val_loader, device, loss_fn):
         i = 0
         for idx, (data, target, id) in enumerate(val_loader):
             data, target = data.to(device), target.to(device)
-            out = model(data)
+            out = model(data.float())
             val_loss += loss_fn(out, target)
             num_correct += sum(torch.argmax(out, dim=1) == target)
             total += len(target)

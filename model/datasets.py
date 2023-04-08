@@ -63,7 +63,7 @@ class Gestures(Dataset):
             landmarks_seq = self.transform(landmarks_seq).float()
 
         # get the label
-        label = self.labels[idx]
+        label = int(self.labels[idx])
 
         # return the sample (landmark sequence (tensor)), object class (int)
         return landmarks_seq, label, idx
@@ -217,7 +217,7 @@ class ToTensor:
         pass
 
     def __call__(self, sample):
-        return transforms.ToTensor()(sample)[0]
+        return transforms.ToTensor()(sample)[0].float()
 
 
 class SubsetWrapper(Dataset):
@@ -229,7 +229,7 @@ class SubsetWrapper(Dataset):
         x, label, idx = self.subset[index]
         if self.transform:
             x = self.transform(x)
-        return x, label, idx
+        return x, int(label), int(idx)
 
     def __len__(self):
         return len(self.subset)

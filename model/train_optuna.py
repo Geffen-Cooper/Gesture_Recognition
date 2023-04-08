@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import optuna
+import logging
 from optuna.storages import RetryFailedTrialCallback
 
 from train import train
@@ -72,8 +73,10 @@ def objective(trial):
     except Exception as e:
         for i in range(10):
             print()
-        print(f"ERROR: {e}")
-        return None
+        logger = logging.getLogger()
+        logger.setLevel(logging.DEBUG)
+        logger.error(str(e), exc_info=True)
+        return float('nan')
     return val_loss
 
 
@@ -86,7 +89,7 @@ if __name__ == '__main__':
     database = "db1"
     ######################
 
-    STUDY_NAME = "initial_optimize"
+    STUDY_NAME = "actual_actual_initial_study_v2"
 
     storage = optuna.storages.RDBStorage(
         # url="sqlite:///:memory:",
@@ -96,6 +99,9 @@ if __name__ == '__main__':
         failed_trial_callback=RetryFailedTrialCallback(max_retry=3),
     )
 
+    print(f"SQL URL: mysql://{user}:{password}@{url}/{database}")
+    print()
+
     sampler = optuna.samplers.TPESampler(multivariate=True, group=True, constant_liar=True)
     study = optuna.create_study(study_name=STUDY_NAME, sampler=sampler, storage=storage, load_if_exists=True)
-    study.optimize(objective, timeout=3600*10, gc_after_trial=True)
+    study.optimize(objective, timeout=3600 * 10, gc_after_trial=True)
