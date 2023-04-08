@@ -27,7 +27,7 @@ def suggest_params(trial: optuna.Trial):
     loss = "CE"
     from_checkpoint = None
     epochs = 100
-    ese = 20
+    ese = 5
     use_cuda = True
     seed = 42
     opt = "Adam"
@@ -89,7 +89,7 @@ if __name__ == '__main__':
     database = "db1"
     ######################
 
-    STUDY_NAME = "actual_actual_initial_study_v2"
+    STUDY_NAME = "actual_actual_initial_study_v3"
 
     storage = optuna.storages.RDBStorage(
         # url="sqlite:///:memory:",
