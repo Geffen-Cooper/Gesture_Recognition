@@ -133,5 +133,5 @@ dmypy.json
 
 data/nvGesture_v1/*
 data/UCF101_subset/*
-/data/csvs/*
-!/data/csvs/generated_csvs.zip
+data/csvs/*
+!data/csvs/generated_csvs.zip
