@@ -86,7 +86,7 @@ if __name__ == '__main__':
     database = "db1"
     ######################
 
-    STUDY_NAME = "test_12"
+    STUDY_NAME = "initial_optimize"
 
     storage = optuna.storages.RDBStorage(
         # url="sqlite:///:memory:",
@@ -98,4 +98,4 @@ if __name__ == '__main__':
 
     sampler = optuna.samplers.TPESampler(multivariate=True, group=True, constant_liar=True)
     study = optuna.create_study(study_name=STUDY_NAME, sampler=sampler, storage=storage, load_if_exists=True)
-    study.optimize(objective, n_trials=100, gc_after_trial=True)
+    study.optimize(objective, timeout=3600*10, gc_after_trial=True)
