@@ -83,7 +83,7 @@ class TransformerFeatureExtractor(nn.Module):
 
         self.embedding_layer = nn.Linear(input_dim, hidden_dim)
         self.transformer_layer = nn.TransformerEncoderLayer(d_model=hidden_dim, nhead=num_heads, dim_feedforward=hidden_dim, batch_first=True)
-        self.transformer = nn.TransformerEncoder(self.transformer_layer, num_layers=num_layers)
+        self.transformer = nn.TransformerEncoder(self.transformer_layer, num_layers=self.num_layers)
 
     def forward(self, x):
         # x shape: (batch_size, seq_len, input_dim)

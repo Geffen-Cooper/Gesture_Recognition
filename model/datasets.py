@@ -266,9 +266,9 @@ def load_nvgesture(batch_size, rand_seed, root_dir, median_filter, augment_angle
         test_set = Gestures(root_dir, test_transforms, train=False, test=True)
 
     # create the data loaders
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=2)
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=4)
     val_loader = DataLoader(val_set, batch_size=batch_size, num_workers=2)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size, num_workers=2)
+    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size, num_workers=4)
 
     # return test_loader
     return (train_loader, val_loader, test_loader)

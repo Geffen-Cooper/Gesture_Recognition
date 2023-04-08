@@ -29,7 +29,7 @@ np.set_printoptions(linewidth=np.nan)
 
 
 def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,epochs,ese,lr,use_cuda,seed,subset, median_filter, augment_angles,
-          model_type, model_hidden_dim_size_rnn, model_hidden_dim_size_trans, save_model_ckpt):
+          model_type, model_hidden_dim_size_rnn, model_hidden_dim_size_trans, save_model_ckpt, model_num_layers_trans, model_num_heads_trans):
 
     writer = SummaryWriter("runs/" + log_name+"_"+str(time.time()))
     # log training parameters
@@ -62,7 +62,7 @@ def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,epochs,ese
         model_params = dict(input_dim=63, hidden_dim=model_hidden_dim_size_rnn, layer_dim=1, output_dim=25, device='cuda')
         model = RNNModel(**model_params).to(device)
     else:
-        model_params = dict(input_dim=63, num_classes=25, num_heads=4, hidden_dim=model_hidden_dim_size_trans, num_layers=2)
+        model_params = dict(input_dim=63, num_classes=25, num_heads=model_num_heads_trans, hidden_dim=model_hidden_dim_size_trans, num_layers=model_num_layers_trans)
         model = TransformerClassifier(**model_params).to(device)
 
     # set loss function
@@ -76,6 +76,8 @@ def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,epochs,ese
         opt = torch.optim.SGD(params=model.parameters(), lr=lr)
     elif optimizer == "Adam":
         opt = torch.optim.Adam(params=model.parameters(), lr=lr)
+    elif optimizer == "AdamW":
+        opt = torch.optim.AdamW(params=model.parameters(), lr=lr)
     else:
         raise NotImplementedError()
 
