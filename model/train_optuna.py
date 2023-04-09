@@ -15,7 +15,7 @@ from train import train
 
 def suggest_params(trial: optuna.Trial):
     # Model
-    model_type = trial.suggest_categorical("model_type", ["RNN", "Transformer"])
+    model_type = trial.suggest_categorical("model_type", ["Transformer"])  # ["RNN", "Transformer"]
     model_hidden_dim_size_rnn = None
     model_hidden_dim_size_trans = None
     model_num_layers_trans = None
@@ -24,9 +24,9 @@ def suggest_params(trial: optuna.Trial):
     if model_type == "RNN":
         model_hidden_dim_size_rnn = trial.suggest_int("model_hidden_dim_size_rnn", low=64, high=256)
     else:
-        model_num_heads_trans = trial.suggest_int("model_num_heads_trans", low=2, high=8)
-        model_hidden_dim_size_trans = trial.suggest_int("model_hidden_dim_size_trans_multiplier", low=10, high=64) * model_num_heads_trans
-        model_num_layers_trans = trial.suggest_int("model_num_layers_trans", low=2, high=6)
+        model_num_heads_trans = trial.suggest_int("model_num_heads_trans", low=2, high=10)
+        model_hidden_dim_size_trans = trial.suggest_int("model_hidden_dim_size_trans_multiplier", low=10, high=128) * model_num_heads_trans
+        model_num_layers_trans = trial.suggest_int("model_num_layers_trans", low=2, high=10)
 
     # Training
     save_model_ckpt = False
@@ -37,7 +37,7 @@ def suggest_params(trial: optuna.Trial):
     use_cuda = True
     seed = 42
     opt = trial.suggest_categorical("opt", ["Adam", "AdamW"])
-    batch_size = trial.suggest_int("batch_size", low=16, high=256)
+    batch_size = trial.suggest_int("batch_size", low=64, high=256)
     lr = trial.suggest_float("lr", low=1e-4, high=1e-2)
 
     # Datasets
@@ -94,7 +94,7 @@ if __name__ == '__main__':
     database = "db1"
     ######################
 
-    STUDY_NAME = "informed_study_v0"
+    STUDY_NAME = "transformer_study_v0"
 
     storage = optuna.storages.RDBStorage(
         # url="sqlite:///:memory:",
