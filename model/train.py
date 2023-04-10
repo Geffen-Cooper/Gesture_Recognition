@@ -53,13 +53,13 @@ def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,epochs,ese
         device = torch.device("cuda")
     else:
         device = torch.device("cpu")
-
+    
     # load datasets
     train_loader, val_loader, test_loader = load_nvgesture(batch_size, seed, root_dir=root_dir,subset=subset, median_filter=median_filter, augment_angles=augment_angles)
 
     # load the model
     if model_type == "RNN":
-        model_params = dict(input_dim=63, hidden_dim=model_hidden_dim_size_rnn, layer_dim=1, output_dim=25, device='cuda')
+        model_params = dict(input_dim=63, hidden_dim=model_hidden_dim_size_rnn, layer_dim=1, output_dim=25, device=device)
         model = RNNModel(**model_params).to(device)
     else:
         model_params = dict(input_dim=63, num_classes=25, num_heads=model_num_heads_trans, hidden_dim=model_hidden_dim_size_trans, num_layers=model_num_layers_trans)
@@ -225,24 +225,31 @@ def validate(model, val_loader, device, loss_fn):
 
 # ===================================== Main =====================================
 if __name__ == "__main__":
-    # training parameters
-    losses = ["CE"]
-    from_checkpoint = [None]
-    opts = ["Adam","SGD"]
-    log_name = ["baseline_"]
-    root_dirs = ["../csvs/front","../csvs/top"]
-    batch_sizes = [32,8,16,64]
-    epochs = [100]
-    ese = [20]
-    lr = [0.001,0.01]
-    use_cuda = [True,False]
-    seed = [42]
-    subsets = [list(np.arange(25)),[0,2,4,6,8,10,12,14,16,18,20,22,24]]
+    # # training parameters
+    # losses = ["CE"]
+    # from_checkpoint = [None]
+    # opts = ["Adam","SGD"]
+    # log_name = ["baseline_"]
+    # root_dirs = ["../csvs/front","../csvs/top"]
+    # batch_sizes = [32,8,16,64]
+    # epochs = [100]
+    # ese = [20]
+    # lr = [0.001,0.01]
+    # use_cuda = [True,False]
+    # seed = [42]
+    # subsets = [list(np.arange(25)),[0,2,4,6,8,10,12,14,16,18,20,22,24]]
 
-    for root_dir in root_dirs:
-        train_params = {'loss':losses[0],'from_checkpoint':from_checkpoint[0],\
-                        'optimizer':opts[0],'log_name':log_name[0]+os.path.basename(root_dir),'root_dir':root_dir,\
-                        'batch_size':batch_sizes[0],'epochs':epochs[0],'ese':ese[0],'lr':lr[0],\
-                        'use_cuda':use_cuda[0],'seed':seed[0],'subset':subsets[1]}
+    # for root_dir in root_dirs:
+    #     train_params = {'loss':losses[0],'from_checkpoint':from_checkpoint[0],\
+    #                     'optimizer':opts[0],'log_name':log_name[0]+os.path.basename(root_dir),'root_dir':root_dir,\
+    #                     'batch_size':batch_sizes[0],'epochs':epochs[0],'ese':ese[0],'lr':lr[0],\
+    #                     'use_cuda':use_cuda[0],'seed':seed[0],'subset':subsets[1]}
 
-        train(**train_params)
+    #     train(**train_params)
+
+    train_params = {'loss': "CE", 'from_checkpoint': None, 'optimizer': "AdamW", 'log_name': "best", 'root_dir': "../csvs/ds_Lw_Sc_C0_V1_Rf",
+                    'batch_size': 213, 'epochs': 50, 'ese': 5, 'lr': 0.00689144, 'use_cuda': False, 'seed': 42, 'subset': tuple(np.arange(25)), 'median_filter': False, 'augment_angles': True,
+                    'model_type': "RNN", 'model_hidden_dim_size_rnn': 192, 'model_hidden_dim_size_trans': 276, 'save_model_ckpt': True,
+                    'model_num_layers_trans': 1, 'model_num_heads_trans': 6}
+
+    train(**train_params)

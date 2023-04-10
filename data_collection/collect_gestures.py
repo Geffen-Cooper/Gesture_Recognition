@@ -17,13 +17,21 @@ mp_drawing_styles = mp.solutions.drawing_styles
 mp_hands = mp.solutions.hands
 
 
-def csv_to_mp_landmark(file):
-    # read the lanmark csv
-    df = pd.read_csv(file)
+descriptions = ["Swipe Hand Left","Swipe Hand Right","Swipe Hand Up","Swipe Hand Down",\
+                "Swipe Two Fingers Left","Swipe Two Fingers Right","Swipe Two Fingers Up","Swipe Two FIngers Down",\
+                "Swipe Index Finger Down","Beckon With Hand","Expand Hand","Jazz Hand","One Finger Up","Two Fingers Up","THree Fingers Up",\
+                "Lift Hand Up","Move Hand Down","Move Hand Forward","Beckon With Arm","TwoFingers Clockwise","Two Fingers CounterClockwise",
+                "Two Fingers Forward","Close Hand","Thumbs Up","OK"]
+
+def csv_to_mp_landmark(file,df=None):
+    if df == None:
+        # read the lanmark csv
+        df = pd.read_csv(file)
 
     # get a mp landmark object
     with open('landmark.pkl', 'rb') as f:
         mp_landmarks = pickle.load(f)
+    f.close()
     
     # create a list of mp landmark objects from csv
     lm_list = []
@@ -80,6 +88,9 @@ collected_first_item = False
 
 files_collected = [os.listdir("data/class_"+str(i)) for i in range(len(os.listdir("data")))]
 print(files_collected)
+
+hold = 0
+
 # start loop
 while True:
     # try to read a frame
@@ -149,7 +160,7 @@ while True:
         print(f"saved to file {fn}")
         count = 0
         collected_first_item = True
-        time.sleep(0.5)
+        hold = time.time()
 
     # calculate the fps
     frame_count += 1
@@ -162,14 +173,15 @@ while True:
    
     cv2.putText(image, fps, (7, 30), font, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
     cv2.putText(image, "class:"+str(class_num), (200, 30), font, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+    cv2.putText(image, descriptions[class_num], (100, 50), font, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
     
     cv2.imshow('window',image)
 
-    if not hand_in_frame and len(files_collected[class_num]) > 0:
+    if not hand_in_frame and len(files_collected[class_num]) > 0 and (time.time()-hold) > 1:
         try:
             last_lm_list = csv_to_mp_landmark(os.path.join("data","class_"+str(class_num),files_collected[class_num][-1]))
             blank[:,:,:] = 0
-            if seq_idx == len(last_lm_list):
+            if seq_idx >= len(last_lm_list):
                 seq_idx = 0
             mp_drawing.draw_landmarks(
                 blank,
@@ -178,10 +190,12 @@ while True:
                 mp_drawing_styles.get_default_hand_landmarks_style(),
                 mp_drawing_styles.get_default_hand_connections_style())
             cv2.putText(blank, "class:"+files_collected[class_num][-1].split('_')[1], (200, 30), font, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
+            cv2.putText(blank, descriptions[class_num], (100, 50), font, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
             cv2.imshow('last sequence',blank)
             seq_idx += 1
         except:
             print(f"ERROR: {files_collected[class_num][-1]}, check last data point")
+            print(len(last_lm_list),seq_idx)
             exit()
 
     # get key
