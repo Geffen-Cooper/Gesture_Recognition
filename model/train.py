@@ -17,6 +17,9 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
+import tensorflow as tf
+import tensorboard as tb
+tf.io.gfile = tb.compat.tensorflow_stub.io.gfile
 from tqdm import tqdm
 import time
 from datasets import *
@@ -188,6 +191,10 @@ def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,epochs,ese
     if not save_model_ckpt:
         os.remove(checkpoint_path)
 
+    print("Generate Embeddings")
+    hidden_size = model_hidden_dim_size_rnn if model_type == "RNN" else model_hidden_dim_size_trans
+    generate_embeddings(test_loader,model,writer,model_type,device,hidden_size)
+
     return test_acc, test_loss
 
 
@@ -223,33 +230,77 @@ def validate(model, val_loader, device, loss_fn):
         return val_acc, val_loss
 
 
+def generate_embeddings(test_loader,model,tb_writer,model_type,device,hidden_size):
+    model.eval().to(device)
+
+    # get batch from test loader
+    batch_imgs, batch_labels, _ = next(iter(test_loader))
+    batch_imgs = batch_imgs.to(device)
+
+    # store output embedding for each timestep, so we can average
+    activation = {}
+    activation['i'] = 0
+    activation['emb'] = torch.zeros((len(batch_labels),hidden_size))
+
+    if model_type == "RNN":
+        # forward hook
+        def get_activation(name):
+            def hook(model, input, output):
+                # accumulate embeddings, this gets called each time step where input
+                # has shape [batch_size,hidden_size]
+                activation['i'] += 1
+                activation[name] += input[0].detach().to('cpu')
+            return hook
+
+        # register the forward hook as input to fully connected layer
+        model.fc.register_forward_hook(get_activation('emb'))
+
+        # forward pass on the batch
+        with torch.no_grad():
+            preds = model(batch_imgs)
+
+            # get the embedings and divide by sequence length
+            embds = activation['emb'].squeeze(1).to('cpu')
+            embds /= activation['i']
+
+            # get the labels
+            batch_label_strings = []
+            for idx,label in enumerate(batch_labels):
+                batch_label_strings.append(str(label.item()))
+
+            # store embeddings to tensorboard
+            tb_writer.add_embedding(embds,metadata=batch_label_strings)
+
+    elif model_type == "Transformer":
+        # forward hook
+        def get_activation(name):
+            def hook(model, input, output):
+                activation[name] = input[0].detach().to('cpu')
+            return hook
+
+        # register the forward hook as input to fully connected layer
+        model.output_layer.register_forward_hook(get_activation('emb'))
+
+        # forward pass on the batch
+        with torch.no_grad():
+            preds = model(batch_imgs)
+            embds = activation['emb'].squeeze(1).to('cpu')
+
+            # get the labels
+            batch_label_strings = []
+            for idx,label in enumerate(batch_labels):
+                batch_label_strings.append(str(label.item()))
+
+            # store embeddings to tensorboard
+            tb_writer.add_embedding(embds,metadata=batch_label_strings)
+
+
 # ===================================== Main =====================================
 if __name__ == "__main__":
-    # # training parameters
-    # losses = ["CE"]
-    # from_checkpoint = [None]
-    # opts = ["Adam","SGD"]
-    # log_name = ["baseline_"]
-    # root_dirs = ["../csvs/front","../csvs/top"]
-    # batch_sizes = [32,8,16,64]
-    # epochs = [100]
-    # ese = [20]
-    # lr = [0.001,0.01]
-    # use_cuda = [True,False]
-    # seed = [42]
-    # subsets = [list(np.arange(25)),[0,2,4,6,8,10,12,14,16,18,20,22,24]]
-
-    # for root_dir in root_dirs:
-    #     train_params = {'loss':losses[0],'from_checkpoint':from_checkpoint[0],\
-    #                     'optimizer':opts[0],'log_name':log_name[0]+os.path.basename(root_dir),'root_dir':root_dir,\
-    #                     'batch_size':batch_sizes[0],'epochs':epochs[0],'ese':ese[0],'lr':lr[0],\
-    #                     'use_cuda':use_cuda[0],'seed':seed[0],'subset':subsets[1]}
-
-    #     train(**train_params)
 
     train_params = {'loss': "CE", 'from_checkpoint': None, 'optimizer': "AdamW", 'log_name': "collected", 'root_dir': "../csvs/collected_data",
-                    'batch_size': 64, 'epochs': 50, 'ese': 5, 'lr': 0.00689144, 'use_cuda': False, 'seed': 42, 'subset': tuple(np.arange(25)), 'median_filter': False, 'augment_angles': False,
-                    'model_type': "RNN", 'model_hidden_dim_size_rnn': 256, 'model_hidden_dim_size_trans': 276, 'save_model_ckpt': True,
+                    'batch_size': 64, 'epochs': 50, 'ese': 5, 'lr': 0.00689144, 'use_cuda': True, 'seed': 42, 'subset': tuple(np.arange(25)), 'median_filter': False, 'augment_angles': False,
+                    'model_type': "Transformer", 'model_hidden_dim_size_rnn': 256, 'model_hidden_dim_size_trans': 276, 'save_model_ckpt': True,
                     'model_num_layers_trans': 1, 'model_num_heads_trans': 6}
 
     train(**train_params)

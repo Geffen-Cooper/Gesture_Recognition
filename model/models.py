@@ -110,5 +110,5 @@ class TransformerClassifier(nn.Module):
         # x shape: (batch_size, seq_len, input_dim)
         x = self.transformer_feature_extractor(x)
         x = self.output_layer(x)
-        x = F.softmax(x, dim=1)
+        # x = F.softmax(x, dim=1)
         return x
