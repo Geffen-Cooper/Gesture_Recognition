@@ -8,7 +8,7 @@ from scipy.signal import medfilt
 import numpy as np
 import re
 from scipy.spatial.transform import Rotation
-
+import torch.nn.utils.rnn as rnn_utils
 
 class Gestures(Dataset):
     def __init__(self, root_dir, transform=None, train=True, test=False, subset=None):
@@ -41,7 +41,6 @@ class Gestures(Dataset):
 
         files = os.listdir(os.path.join(root_dir, subdir))
         files.sort(key=lambda f: int(f.split("_")[1]))
-        bad_idxs = [136, 181, 182, 226, 240, 262, 272, 302, 363, 376]
         for i, file in enumerate(files):
             # if i in bad_idxs:
             #     continue
@@ -235,6 +234,38 @@ class SubsetWrapper(Dataset):
         return len(self.subset)
 
 
+'''Custom Batching For Varying Length Sequences:
+
+   Here we simply pad all samples to be the length of the longest
+   sequence in the batch. We could try using 'packing' to make
+   this process more efficient but our data is small enough that
+   using unpacked batches is fine.
+'''
+def varying_length_collate_fn(sample_tuples):
+    # sample_tuples is list of samples returned by get_item: [(landmarks_seq, label, idx), (landmarks_seq, label, idx), ...]
+
+    # sort the tuples in the batch based on the length of the data portion (descending order)
+    sorted_samples = sorted(sample_tuples,key=lambda x: x[0].shape[0],reverse=True)
+
+    # get the data portion from the batch tuples
+    sequences = [x[0] for x in sorted_samples]
+
+    # pad the shorter sequences with zeros
+    sequences_padded = rnn_utils.pad_sequence(sequences,batch_first=True)
+
+    # store the true length of the sequences
+    lengths = torch.LongTensor([len(x) for x in sequences])
+
+    # get the label portion from the batch tuples
+    labels = torch.LongTensor([int(x[1]) for x in sorted_samples])
+
+    # get the index
+    idxs = torch.LongTensor([int(x[2]) for x in sorted_samples])
+
+    return sequences_padded.float(),labels,idxs
+
+
+
 def load_nvgesture(batch_size, rand_seed, root_dir, median_filter, augment_angles, subset=None):
     tsfm_lst = []
     if augment_angles:
@@ -266,12 +297,13 @@ def load_nvgesture(batch_size, rand_seed, root_dir, median_filter, augment_angle
         test_set = Gestures(root_dir, test_transforms, train=False, test=True)
 
     # create the data loaders
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=4)
-    val_loader = DataLoader(val_set, batch_size=batch_size, num_workers=2)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size, num_workers=4)
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=varying_length_collate_fn)
+    val_loader = DataLoader(val_set, batch_size=batch_size, num_workers=2, collate_fn=varying_length_collate_fn)
+    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size, num_workers=4, collate_fn=varying_length_collate_fn)
 
     # return test_loader
     return (train_loader, val_loader, test_loader)
+
 
 
 if __name__ == '__main__':
