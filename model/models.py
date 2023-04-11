@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from collections import defaultdict
+import logging
 
 
 # Create RNN Model
@@ -118,19 +120,92 @@ class RNNFeatureExtractor(nn.Module):
         return output
 
 
-class RNNTest(nn.Module):
-    def __init__(self, input_dim, hidden_dim, latent_dim, layer_dim, output_dim, device):
-        super(RNNTest, self).__init__()
-        self.feature_extractor = RNNFeatureExtractor(input_dim=input_dim, hidden_dim=hidden_dim, latent_dim=latent_dim,
-                                                     layer_dim=layer_dim, device=device)
-        self.fc = nn.Linear(latent_dim, output_dim)
-        self.relu = nn.ReLU()
+class CentroidModel(nn.Module):
+    def __init__(self, input_dim, hidden_dim, latent_dim, layer_dim, rnn_type, rnn_use_last, checkpoint_file=None, device='cuda'):
+        super().__init__()
+        self.checkpoint_file = checkpoint_file
+        self.device = device
+        self.fe_model = RNNFeatureExtractor(input_dim=input_dim, hidden_dim=hidden_dim, latent_dim=latent_dim, layer_dim=layer_dim, rnn_type=rnn_type, rnn_use_last=rnn_use_last, device=device).to(device)
+
+        if self.checkpoint_file:
+            logging.warning("Checkpoint not specified, loading untrained model!")
+            checkpoint = torch.load(self.checkpoint_file)
+            print(f"Loading RNNFeatureExtractor with epoch: {checkpoint['epoch']}, val_acc: {checkpoint['val_acc']}, val_loss: {checkpoint['val_loss']}")
+            self.fe_model.load_state_dict(checkpoint['model_state_dict'])
+
+        # Centroids
+        self.centroids = defaultdict(lambda: torch.zeros(latent_dim).to(self.device))
+        self.class_counts = defaultdict(lambda: 0)
+
+    def get_embeddings(self, x):
+        with torch.no_grad():
+            x = x.to(self.device)
+            embeddings = self.fe_model(x)
+        return embeddings
 
     def forward(self, x):
-        x = self.feature_extractor(x)
-        x = self.relu(x)
-        x = self.fc(x)
-        return x
+        embeddings = self.get_embeddings(x)
+        centroids, class_nums = self.get_centroids_as_tensor()
+        dists = self.euclidean_dist(embeddings, centroids)
+        closest_class_idxs = dists.argmin(dim=1)
+        decoded_class_nums = class_nums.to(self.device).gather(0, closest_class_idxs)
+        return decoded_class_nums
+
+    def num_classes(self):
+        return len(self.centroids)
+
+    def learn_centroid(self, x, class_num):
+        embeddings = self.get_embeddings(x)
+        self.centroids[class_num] = (self.centroids[class_num] * self.class_counts[class_num] + embeddings.mean(dim=0)) / (self.class_counts[class_num] + embeddings.size(0))
+        self.class_counts[class_num] += embeddings.size(0)
+
+    def get_centroids_as_tensor(self):
+        """
+        Returns: Centroids, corresponding class list
+        """
+        centroid_lst = []
+        class_num_lst = []
+        for class_num, class_centroid in self.centroids.items():
+            class_num_lst.append(class_num)
+            centroid_lst.append(class_centroid)
+
+        sorted_pairs = sorted(zip(class_num_lst, centroid_lst), key=lambda pair: pair[0])
+        class_num_lst = [x for x, _ in sorted_pairs]
+        centroid_lst = [x for _, x in sorted_pairs]
+
+        return torch.stack(centroid_lst).squeeze(), torch.Tensor(class_num_lst)
+
+
+    def euclidean_dist(self, x, y):
+        '''
+        Compute euclidean distance between two tensors
+        '''
+        # x: N x D
+        # y: M x D
+        n = x.size(0)
+        m = y.size(0)
+        d = x.size(1)
+        if d != y.size(1):
+            raise Exception
+
+        x = x.unsqueeze(1).expand(n, m, d)
+        y = y.unsqueeze(0).expand(n, m, d)
+
+        return torch.pow(x - y, 2).sum(2)
+
+# class RNNTest(nn.Module):
+#     def __init__(self, input_dim, hidden_dim, latent_dim, layer_dim, output_dim, device):
+#         super(RNNTest, self).__init__()
+#         self.feature_extractor = RNNFeatureExtractor(input_dim=input_dim, hidden_dim=hidden_dim, latent_dim=latent_dim,
+#                                                      layer_dim=layer_dim, device=device)
+#         self.fc = nn.Linear(latent_dim, output_dim)
+#         self.relu = nn.ReLU()
+#
+#     def forward(self, x):
+#         x = self.feature_extractor(x)
+#         x = self.relu(x)
+#         x = self.fc(x)
+#         return x
 
 
 # # Create RNN Model
@@ -212,3 +287,22 @@ class TransformerClassifier(nn.Module):
         x = self.output_layer(x)
         # x = F.softmax(x, dim=1)
         return x
+
+if __name__ == '__main__':
+    model = CentroidModel(input_dim=63, layer_dim=1, latent_dim=10, hidden_dim=128, rnn_type='GRU', rnn_use_last=False)
+
+    data = torch.rand((200, 80, 63))
+    print(model.get_embeddings(data))
+
+    print()
+    data = torch.rand((200, 80, 63))
+    model.learn_centroid(data * 0.01, 0)
+    model.learn_centroid(data * 1, 1)
+    model.learn_centroid(data * 2, 2)
+    model.learn_centroid(data * 3, 3)
+    model.learn_centroid(data * 4, 4)
+
+    print(model.get_centroids_as_tensor())
+
+    data = torch.rand((200, 80, 63)) * 4
+    print(model(data))
