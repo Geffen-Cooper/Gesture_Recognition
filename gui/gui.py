@@ -73,8 +73,8 @@ class MyWidget(base_class, Ui_Widget):
             # frame_resized = cv2.resize(frame, (self.video.width(), int(self.video.width() * ratio)))
 
             # Convert the frame to QImage format
-            qimg = QtGui.QImage(frame_resized.video, frame_resized.shape[1], frame_resized.shape[0], QtGui.QImage.Format_RGB888)
-
+            # qimg = QtGui.QImage(frame_resized.video, frame_resized.shape[1], frame_resized.shape[0], QtGui.QImage.Format_RGB888)
+            qimg = QtGui.QImage(frame_resized, frame_resized.shape[1], frame_resized.shape[0], QtGui.QImage.Format_RGB888)
             # Set the video label's pixmap to the QImage
             self.video.setPixmap(QtGui.QPixmap.fromImage(qimg))
 

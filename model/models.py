@@ -36,6 +36,47 @@ class RNNModel(torch.nn.Module):
         return pred / x.shape[1]
 
 
+class RNNFeatureExtractor(nn.Module):
+    def __init__(self, input_dim, hidden_dim, latent_dim, layer_dim, rnn_type, device):
+        super(RNNFeatureExtractor, self).__init__()
+
+        # Number of hidden dimensions
+        self.hidden_dim = hidden_dim
+
+        # Number of hidden layers
+        self.layer_dim = layer_dim
+
+        self.device = device
+
+        # RNN
+        if rnn_type == "GRU":
+            self.rnn = nn.GRU(input_size=input_dim, hidden_size=hidden_dim, num_layers=layer_dim, batch_first=True)
+        elif rnn_type == "LSTM":
+            self.rnn = nn.LSTM(input_size=input_dim, hidden_size=hidden_dim, num_layers=layer_dim, batch_first=True)
+        self.embedder = nn.Linear(hidden_dim, latent_dim)
+
+    def forward(self, x):
+        rnn_out, _ = self.rnn(x)
+        rnn_mean = torch.mean(rnn_out, dim=1)
+        output = self.embedder(rnn_mean)
+        return output
+
+
+class RNNTest(nn.Module):
+    def __init__(self, input_dim, hidden_dim, latent_dim, layer_dim, output_dim, device):
+        super(RNNTest, self).__init__()
+        self.feature_extractor = RNNFeatureExtractor(input_dim=input_dim, hidden_dim=hidden_dim, latent_dim=latent_dim,
+                                                     layer_dim=layer_dim, device=device)
+        self.fc = nn.Linear(latent_dim, output_dim)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        x = self.feature_extractor(x)
+        x = self.relu(x)
+        x = self.fc(x)
+        return x
+
+
 # # Create RNN Model
 # class RNNModel(torch.nn.Module):
 #     def __init__(self, input_dim, hidden_dim, layer_dim, output_dim):
@@ -82,7 +123,8 @@ class TransformerFeatureExtractor(nn.Module):
         self.num_heads = num_heads
 
         self.embedding_layer = nn.Linear(input_dim, hidden_dim)
-        self.transformer_layer = nn.TransformerEncoderLayer(d_model=hidden_dim, nhead=num_heads, dim_feedforward=hidden_dim, batch_first=True)
+        self.transformer_layer = nn.TransformerEncoderLayer(d_model=hidden_dim, nhead=num_heads,
+                                                            dim_feedforward=hidden_dim, batch_first=True)
         self.transformer = nn.TransformerEncoder(self.transformer_layer, num_layers=self.num_layers)
 
     def forward(self, x):
@@ -103,7 +145,9 @@ class TransformerClassifier(nn.Module):
         self.num_layers = num_layers
         self.num_heads = num_heads
 
-        self.transformer_feature_extractor = TransformerFeatureExtractor(input_dim=input_dim, hidden_dim=hidden_dim, num_classes=num_classes, num_layers=num_layers, num_heads=num_heads)
+        self.transformer_feature_extractor = TransformerFeatureExtractor(input_dim=input_dim, hidden_dim=hidden_dim,
+                                                                         num_classes=num_classes, num_layers=num_layers,
+                                                                         num_heads=num_heads)
         self.output_layer = nn.Linear(hidden_dim, num_classes)
 
     def forward(self, x):

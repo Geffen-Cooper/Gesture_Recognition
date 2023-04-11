@@ -5,7 +5,9 @@
 '''
 
 import argparse
+import functools
 import glob
+import inspect
 import math
 import random
 import re
@@ -27,12 +29,15 @@ from models import *
 import time
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import optuna
+from utils import utils
 
 np.set_printoptions(linewidth=np.nan)
 
 
+
+@utils.ignore_unmatched_kwargs
 def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,epochs,ese,lr,use_cuda,seed,subset, median_filter, augment_angles,
-          model_type, model_hidden_dim_size_rnn, model_hidden_dim_size_trans, save_model_ckpt, model_num_layers_trans, model_num_heads_trans):
+          model_type, model_hidden_dim_size_rnn, save_model_ckpt, model_hidden_dim_size_trans=None, model_num_layers_trans=None, model_num_heads_trans=None, model_lambda=None):
 
     writer = SummaryWriter("runs/" + log_name+"_"+str(time.time()))
     # log training parameters
@@ -64,9 +69,11 @@ def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,epochs,ese
     if model_type == "RNN":
         model_params = dict(input_dim=63, hidden_dim=model_hidden_dim_size_rnn, layer_dim=1, output_dim=25, device=device)
         model = RNNModel(**model_params).to(device)
-    else:
+    elif model_type == "Transformer":
         model_params = dict(input_dim=63, num_classes=25, num_heads=model_num_heads_trans, hidden_dim=model_hidden_dim_size_trans, num_layers=model_num_layers_trans)
         model = TransformerClassifier(**model_params).to(device)
+    else:
+        model = model_lambda()
 
     # set loss function
     if loss == "CE":
