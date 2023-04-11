@@ -284,17 +284,32 @@ def load_nvgesture(batch_size, rand_seed, root_dir, median_filter, augment_angle
     ])
 
     if subset != None:
-        dataset = Gestures(root_dir, None, train=True, subset=subset)
+        dataset = Gestures(root_dir[0], None, train=True, subset=subset)
         train_subset, val_subset = torch.utils.data.random_split(dataset, [int(len(dataset) * 0.9), len(dataset) - int(len(dataset) * .9)])
         train_set = SubsetWrapper(train_subset, transform=train_transforms)
         val_set = SubsetWrapper(val_subset, transform=test_transforms)
-        test_set = Gestures(root_dir, test_transforms, train=False, test=True, subset=subset)
+        test_set = Gestures(root_dir[0], test_transforms, train=False, test=True, subset=subset)
+        for rd in root_dir[1:]:
+            dataset = Gestures(rd, None, train=True, subset=subset)
+            train_subset, val_subset = torch.utils.data.random_split(dataset, [int(len(dataset) * 0.9), len(dataset) - int(len(dataset) * .9)])
+            
+            train_set = torch.utils.data.ConcatDataset([train_set,SubsetWrapper(train_subset, transform=train_transforms)])
+            val_set = torch.utils.data.ConcatDataset([val_set,SubsetWrapper(val_subset, transform=test_transforms)])
+            test_set = torch.utils.data.ConcatDataset([test_set,Gestures(rd, test_transforms, train=False, test=True, subset=subset)])
+            
     else:
-        dataset = Gestures(root_dir, None, train=True)
+        dataset = Gestures(root_dir[0], None, train=True)
         train_subset, val_subset = torch.utils.data.random_split(dataset, [int(len(dataset) * 0.9), len(dataset) - int(len(dataset) * .9)])
         train_set = SubsetWrapper(train_subset, transform=train_transforms)
         val_set = SubsetWrapper(val_subset, transform=test_transforms)
-        test_set = Gestures(root_dir, test_transforms, train=False, test=True)
+        test_set = Gestures(root_dir[0], test_transforms, train=False, test=True)
+        for rd in root_dir[1:]:
+            dataset = Gestures(rd, None, train=True, subset=subset)
+            train_subset, val_subset = torch.utils.data.random_split(dataset, [int(len(dataset) * 0.9), len(dataset) - int(len(dataset) * .9)])
+            
+            train_set = torch.utils.data.ConcatDataset([train_set,SubsetWrapper(train_subset, transform=train_transforms)])
+            val_set = torch.utils.data.ConcatDataset([val_set,SubsetWrapper(val_subset, transform=test_transforms)])
+            test_set = torch.utils.data.ConcatDataset([test_set,Gestures(rd, test_transforms, train=False, test=True)])
 
     # create the data loaders
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=varying_length_collate_fn)
