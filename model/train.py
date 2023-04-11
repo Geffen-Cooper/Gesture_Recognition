@@ -5,7 +5,9 @@
 '''
 
 import argparse
+import functools
 import glob
+import inspect
 import math
 import random
 import re
@@ -27,12 +29,15 @@ from models import *
 import time
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import optuna
+# from utils import utils
 
 np.set_printoptions(linewidth=np.nan)
 
 
+
+# @utils.ignore_unmatched_kwargs
 def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,epochs,ese,lr,use_cuda,seed,subset, median_filter, augment_angles,
-          model_type, model_hidden_dim_size_rnn, model_hidden_dim_size_trans, save_model_ckpt, model_num_layers_trans, model_num_heads_trans):
+          model_type, model_hidden_dim_size_rnn, save_model_ckpt, model_hidden_dim_size_trans=None, model_num_layers_trans=None, model_num_heads_trans=None, model_lambda=None):
 
     writer = SummaryWriter("runs/" + log_name+"_"+str(time.time()))
     # log training parameters
@@ -70,6 +75,8 @@ def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,epochs,ese
     elif model_type == "Transformer":
         model_params = dict(input_dim=63, num_classes=25, num_heads=model_num_heads_trans, hidden_dim=model_hidden_dim_size_trans, num_layers=model_num_layers_trans)
         model = TransformerClassifier(**model_params).to(device)
+    else:
+        model = model_lambda()
 
     # set loss function
     if loss == "CE":
@@ -242,17 +249,12 @@ def generate_embeddings(test_loader,model,tb_writer,model_type,device,hidden_siz
 
     # store output embedding for each timestep, so we can average
     activation = {}
-    activation['i'] = 0
-    activation['emb'] = torch.zeros((len(batch_labels),hidden_size))
 
     if model_type == "RNN" or model_type == "AttentionRNN":
         # forward hook
         def get_activation(name):
             def hook(model, input, output):
-                # accumulate embeddings, this gets called each time step where input
-                # has shape [batch_size,hidden_size]
-                activation['i'] += 1
-                activation[name] += input[0].detach().to('cpu')
+                activation[name] = input[0].detach().to('cpu')
             return hook
 
         # register the forward hook as input to fully connected layer
@@ -264,7 +266,6 @@ def generate_embeddings(test_loader,model,tb_writer,model_type,device,hidden_siz
 
             # get the embedings and divide by sequence length
             embds = activation['emb'].squeeze(1).to('cpu')
-            embds /= activation['i']
 
             # get the labels
             batch_label_strings = []
