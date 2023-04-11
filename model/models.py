@@ -29,63 +29,59 @@ class RNNModel(torch.nn.Module):
         h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to(self.device)
         c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to(self.device)
 
-        # loop
-        # out, (hi, ci) = self.rnn(x[:, 0, :].unsqueeze(1), (h0, c0))
-        # pred = self.fc(out[:, -1, :])
-        # for i in range(1, x.shape[1]):
-        #     out, (hi, ci) = self.rnn(x[:, i, :].unsqueeze(1), (hi, ci))
-        #     pred += self.fc(out[:, -1, :])
-        # return pred / x.shape[1]
+        # output shape is (batch size, sequence length, feature dim)
+        # it stores the hidden state for all timesteps
+        output, (hn, cn) = self.rnn(x, (h0, c0))
+
+        # average over sequence
+        avg_hidden = torch.mean(output,dim=1)
+        return self.fc(avg_hidden)
+
+
+# Create RNN Model with attention
+class AttentionRNNModel(torch.nn.Module):
+    def __init__(self, input_dim, hidden_dim, layer_dim, output_dim, device):
+        super(AttentionRNNModel, self).__init__()
+
+        # Number of hidden dimensions
+        self.hidden_dim = hidden_dim
+
+        # Number of hidden layers
+        self.layer_dim = layer_dim
+
+        self.device = device
+
+        # RNN
+        self.rnn = torch.nn.LSTM(input_dim, hidden_dim, layer_dim, batch_first=True)
+
+        # attention
+        self.attention = torch.nn.Linear(hidden_dim, 1)
+
+        # Readout layer
+        self.fc = torch.nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x):
+        # Initialize hidden state with zeros
+        h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to(self.device)
+        c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to(self.device)
+
+        # (batch_size,sequence length) since we want a weight for each hidden state in the sequence
+        attention_weights = torch.zeros((x.shape[0],x.shape[1])).to(self.device)
 
         # output shape is (batch size, sequence length, feature dim)
         output, (hn, cn) = self.rnn(x, (h0, c0))
 
-        # average over sequence
-        pred = torch.zeros(x.shape[0], self.fc.out_features).to(self.device)
+        # for each time step, get the attention weight (do this over the batch)
         for i in range(x.shape[1]):
-            pred += self.fc(output[:, i, :])
-        return pred / x.shape[1]
+            attention_weights[:,i] = self.attention(output[:,i,:]).view(-1)
+        attention_weights = F.softmax(attention_weights,dim=1)
 
-    # Create RNN Model with attention
-    class AttentionRNNModel(torch.nn.Module):
-        def __init__(self, input_dim, hidden_dim, layer_dim, output_dim, device):
-            super(RNNModel, self).__init__()
+        # apply attention weights for each element in batch
+        attended = torch.zeros(output.shape[0],output.shape[2]).to(self.device)
+        for i in range(x.shape[0]):
+            attended[i,:] = attention_weights[i]@output[i,:,:]
 
-            # Number of hidden dimensions
-            self.hidden_dim = hidden_dim
-
-            # Number of hidden layers
-            self.layer_dim = layer_dim
-
-            self.device = device
-
-            # RNN
-            self.rnn = torch.nn.LSTM(input_dim, hidden_dim, layer_dim, batch_first=True)
-
-            # attention
-            self.attention = torch.nn.Linear(hidden_dim, 1)
-
-            # Readout layer
-            self.fc = torch.nn.Linear(hidden_dim, output_dim)
-
-        def forward(self, x):
-            # Initialize hidden state with zeros
-            h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to(self.device)
-            c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to(self.device)
-
-            attention_weights = torch.zeros((x.shape[0], x.shape[1])).to(self.device)
-
-            # output shape is (batch size, sequence length, feature dim)
-            output, (hn, cn) = self.rnn(x, (h0, c0))
-
-            # we need to figure out how to apply on the batch dimension, this is not quite right
-            pred = torch.zeros(x.shape[0], self.fc.out_features).to(self.device)
-            for i in range(x.shape[1]):
-                attention_weights[i] = self.attention(output[:, i, :])
-
-            attention_weights = F.softmax(attention_weights, dim=1)
-            pred = self.fc(output @ attention_weights)  # this is not quite right
-            # return pred / x.shape[1]
+        return self.fc(attended)
 
 
 class RNNFeatureExtractor(nn.Module):
@@ -207,41 +203,6 @@ class CentroidModel(nn.Module):
 #         x = self.fc(x)
 #         return x
 
-
-# # Create RNN Model
-# class RNNModel(torch.nn.Module):
-#     def __init__(self, input_dim, hidden_dim, layer_dim, output_dim):
-#         super(RNNModel, self).__init__()
-
-#         # Number of hidden dimensions
-#         self.hidden_dim = hidden_dim
-
-#         # Number of hidden layers
-#         self.layer_dim = layer_dim
-
-#         # RNN
-#         # self.rnn = torch.nn.RNN(input_dim, hidden_dim, layer_dim, batch_first=True, nonlinearity='relu')
-#         self.rnn = torch.nn.LSTM(input_dim, hidden_dim, layer_dim, batch_first=True)
-#         # Readout layer
-#         self.fc_layers = torch.nn.ModuleList([torch.nn.Linear(hidden_dim, 32) for i in range(80)])
-
-#         self.final = torch.nn.Linear(32*80,output_dim)
-#         self.do = torch.nn.Dropout()
-
-#     def forward(self, x):
-#         # Initialize hidden state with zeros
-#         h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to('cuda')
-#         c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to('cuda')
-
-#         # loop
-#         out, (hi,ci) = self.rnn(x[:,0,:].unsqueeze(1), (h0,c0))
-#         pred = self.do(self.fc_layers[0](out[:,-1,:]))
-#         for i in range(1,x.shape[1]):
-#             out, (hi,ci) = self.rnn(x[:,i,:].unsqueeze(1), (hi,ci))
-#             pred = torch.cat([pred,self.do(self.fc_layers[i](out[:,-1,:]))],dim=1)
-
-#         # print(pred.shape)
-#         return self.final(pred)
 
 
 class TransformerFeatureExtractor(nn.Module):
