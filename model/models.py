@@ -36,6 +36,7 @@ class RNNModel(torch.nn.Module):
         # return pred / x.shape[1]
 
         # output shape is (batch size, sequence length, feature dim)
+        # it stores the hidden state for all timesteps
         output, (hn, cn) = self.rnn(x, (h0, c0))
         
         # average over sequence
@@ -48,7 +49,7 @@ class RNNModel(torch.nn.Module):
 # Create RNN Model with attention
 class AttentionRNNModel(torch.nn.Module):
     def __init__(self, input_dim, hidden_dim, layer_dim, output_dim, device):
-        super(RNNModel, self).__init__()
+        super(AttentionRNNModel, self).__init__()
 
         # Number of hidden dimensions
         self.hidden_dim = hidden_dim
@@ -72,19 +73,23 @@ class AttentionRNNModel(torch.nn.Module):
         h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to(self.device)
         c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to(self.device)
 
+        # (batch_size,sequence length) since we want a weight for each hidden state in the sequence
         attention_weights = torch.zeros((x.shape[0],x.shape[1])).to(self.device)
 
         # output shape is (batch size, sequence length, feature dim)
         output, (hn, cn) = self.rnn(x, (h0, c0))
-
-        # we need to figure out how to apply on the batch dimension, this is not quite right
-        pred = torch.zeros(x.shape[0],self.fc.out_features).to(self.device)
-        for i in range(x.shape[1]):
-            attention_weights[i] = self.attention(output[:,i,:])
         
+        # for each time step, get the attention weight (do this over the batch)
+        for i in range(x.shape[1]):
+            attention_weights[:,i] = self.attention(output[:,i,:]).view(-1)
         attention_weights = F.softmax(attention_weights,dim=1)
-        pred = self.fc(output@attention_weights) # this is not quite right
-        #return pred / x.shape[1]
+
+        # apply attention weights for each element in batch
+        attended = torch.zeros(output.shape[0],output.shape[2]).to(self.device)
+        for i in range(x.shape[0]):
+            attended[i,:] = attention_weights[i]@output[i,:,:]
+
+        return self.fc(attended)
 
 
 class TransformerFeatureExtractor(nn.Module):
