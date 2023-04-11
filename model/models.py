@@ -87,7 +87,7 @@ class RNNModel(torch.nn.Module):
 
 
 class RNNFeatureExtractor(nn.Module):
-    def __init__(self, input_dim, hidden_dim, latent_dim, layer_dim, rnn_type, device):
+    def __init__(self, input_dim, hidden_dim, latent_dim, layer_dim, rnn_type, rnn_use_last, device):
         super(RNNFeatureExtractor, self).__init__()
 
         # Number of hidden dimensions
@@ -95,6 +95,9 @@ class RNNFeatureExtractor(nn.Module):
 
         # Number of hidden layers
         self.layer_dim = layer_dim
+
+        # Use last output instead of average output
+        self.rnn_use_last = rnn_use_last
 
         self.device = device
 
@@ -107,7 +110,10 @@ class RNNFeatureExtractor(nn.Module):
 
     def forward(self, x):
         rnn_out, _ = self.rnn(x)
-        rnn_mean = torch.mean(rnn_out, dim=1)
+        if not self.rnn_use_last:
+            rnn_mean = torch.mean(rnn_out, dim=1)
+        else:
+            rnn_mean = rnn_out[:, -1, :]
         output = self.embedder(rnn_mean)
         return output
 

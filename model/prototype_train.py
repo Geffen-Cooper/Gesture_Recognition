@@ -194,6 +194,7 @@ if __name__ == '__main__':
         model_params['latent_dim'] = trial.suggest_int('latent_dim', 10, 128)  # 64
         model_params['layer_dim'] = trial.suggest_int('layer_dim', 1, 2) # 1
         model_params['rnn_type'] = trial.suggest_categorical('rnn_type', ["GRU", "LSTM"])
+        model_params['rnn_use_last'] = trial.suggest_categorical('rnn_use_last', [False, True])
         model_params['device'] = 'cuda'
 
         # Datasets
@@ -263,5 +264,5 @@ if __name__ == '__main__':
     print()
 
     sampler = optuna.samplers.TPESampler(multivariate=True, group=True, constant_liar=True)
-    study = optuna.create_study(study_name=STUDY_NAME, sampler=sampler, storage=storage, load_if_exists=True)
+    study = optuna.create_study(study_name=STUDY_NAME, sampler=sampler, storage=storage, load_if_exists=True, directions=['minimize', 'maximize'])
     study.optimize(objective, timeout=3600 * 10, gc_after_trial=True)
