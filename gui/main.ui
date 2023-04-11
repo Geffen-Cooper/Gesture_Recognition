@@ -136,6 +136,9 @@
    <property name="autoFillBackground">
     <bool>false</bool>
    </property>
+   <property name="editTriggers">
+    <set>QAbstractItemView::NoEditTriggers</set>
+   </property>
    <property name="alternatingRowColors">
     <bool>false</bool>
    </property>
@@ -215,25 +218,25 @@
     <rect>
      <x>630</x>
      <y>330</y>
-     <width>81</width>
+     <width>161</width>
      <height>31</height>
     </rect>
    </property>
    <property name="text">
-    <string>New</string>
+    <string>New Gesture</string>
    </property>
   </widget>
   <widget class="QPushButton" name="save_gesture">
    <property name="geometry">
     <rect>
-     <x>720</x>
-     <y>330</y>
-     <width>81</width>
+     <x>630</x>
+     <y>370</y>
+     <width>161</width>
      <height>31</height>
     </rect>
    </property>
    <property name="text">
-    <string>Save</string>
+    <string>Edit Gestue</string>
    </property>
   </widget>
  </widget>
