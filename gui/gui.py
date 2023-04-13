@@ -4,23 +4,31 @@ import logging
 import re
 import sys
 from pathlib import Path
+from typing import List
 
 import ahk
 import cv2
 import numpy as np
 import pandas as pd
 import torch
-from PyQt5 import QtCore
+from PyQt5 import QtCore, Qt
 from PyQt5 import QtGui, uic
 from PyQt5.QtCore import pyqtSignal
-from PyQt5.QtWidgets import QApplication, QMainWindow, QDialog
+from PyQt5.QtGui import QPixmap
+from PyQt5.QtWidgets import QApplication, QMainWindow, QDialog, QGraphicsScene
 from PyQt5.QtWidgets import QFileDialog, QTableWidgetItem
 # Load the UI file
+from matplotlib import pyplot as plt
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
 from torchvision import transforms
 
 from model.HandPoseModel import HandPoseModel
 from model.datasets import DataframeToNumpy, NormalizeAndFilter, ToTensor
-from model.models import CentroidModel
+from model.models import CentroidModel, SklearnModel, FewShotModel
+
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+import seaborn as sns
 
 
 class GestureControlMain(QMainWindow):
@@ -32,13 +40,13 @@ class GestureControlMain(QMainWindow):
 
         # Popup window properties
         self.new_gesture_window: NewGestureWindow = None
-        self.new_gesture_id: int = None
+        self.new_gesture_idx: int = None
 
         uic.loadUi("home.ui", self)
 
 
         # Setup gestures
-        self.gestures = []  # [{id, name, action, dataset}]]
+        self.gestures: List[dict] = []  # [{name, action, dataset}]]
         self.gesture_ongoing = False
         self.gesture_hist: pd.DataFrame = None
         self.gesture_frame_hist = []
@@ -65,21 +73,25 @@ class GestureControlMain(QMainWindow):
         self.timer = QtCore.QTimer(self)
         self.timer.setTimerType(QtCore.Qt.PreciseTimer)
         self.timer.timeout.connect(self.update_frame)
-        self.fps = 15
+        self.fps = 20
         self.timer.start(1000 // self.fps)
 
+        # Setup conf mat
+        self.conf_mat_scene = QGraphicsScene(self)
+        self.conf_mat.setScene(self.conf_mat_scene)
+
         # Setup models
-        self.centroid_model: CentroidModel = None
-        self.setup_model("assets/ProtomodelTrain.pth", "assets/protomodel_params.json")
-        self.lm_type = "w"
-        self.use_clahe = False
-        self.video_mode = True
-        # self.resolution_method = "f"
-        self.median_filter = False
+        self.lm_type = None
+        self.use_clahe = None
+        self.video_mode = None
+        self.resolution_method = None
+        self.median_filter = None
+
+        self.few_shot_model: FewShotModel = None
+        self.setup_fewshot_model("assets/ProtomodelTrain3.pth", "assets/protomodel_params3.json")
         self.transforms = transforms.Compose([DataframeToNumpy(), NormalizeAndFilter(median_filter=self.median_filter), ToTensor()])
 
         self.handpose_model = HandPoseModel(filter_handedness='Right', draw_pose=True, video_mode=self.video_mode, lm_type=self.lm_type)
-
 
         # Connect button handlers
         self.add_new_gesture.clicked.connect(self.open_new_gesture_window)
@@ -87,19 +99,23 @@ class GestureControlMain(QMainWindow):
 
     def open_new_gesture_window_for_edit(self):
         selected_row = self.gestures_table.currentRow()
-        id_item = self.gestures_table.item(selected_row, 0)
-        self.open_new_gesture_window(None, gesture_id=int(id_item.text()))
+        if selected_row >= 0:
+            self.open_new_gesture_window(None, gesture_idx=selected_row)
+        else:
+            self.status_box.setText('No row selected to edit.')
 
-    def open_new_gesture_window(self, _, gesture_id=None):
+    def open_new_gesture_window(self, _, gesture_idx=None):
         if self.new_gesture_window is None or not self.new_gesture_window.isVisible():
-            if gesture_id is None:
-                if len(self.gestures) > 0:
-                    gesture_id = max(self.gestures, key=lambda x: x['id'])['id'] + 1
-                else:
-                    gesture_id = 0
+            if gesture_idx is not None:
+                name = self.gestures[gesture_idx]['name']
+                action = self.gestures[gesture_idx]['action']
+                dataset = self.gestures[gesture_idx]['dataset']
+                self.new_gesture_idx = gesture_idx
+                self.new_gesture_window = NewGestureWindow(fps=self.fps, idx=self.new_gesture_idx, name=name, action=action, dataset=dataset)
+            else:
+                self.new_gesture_idx = len(self.gestures)
+                self.new_gesture_window = NewGestureWindow(fps=self.fps, idx=self.new_gesture_idx)
 
-            self.new_gesture_id = gesture_id
-            self.new_gesture_window = NewGestureWindow(fps=self.fps, id=self.new_gesture_id)
             self.new_gesture_window.save_sample_signal.connect(self.handle_save_sample)
             self.new_gesture_window.confirm_info_signal.connect(self.handle_confirm_info)
             self.new_gesture_window.finished.connect(self.handle_dialog_finished)
@@ -125,7 +141,8 @@ class GestureControlMain(QMainWindow):
             gesture, proba = self.process_landmark_vector(frame)
 
             if gesture is not None:
-                self.prediction_label.setText(str(gesture) +"\t"+ str(proba.tolist()))
+                self.status_box.setText(str(gesture) +"\t"+ str(proba.tolist()))
+                print(f"Detected Gesture {gesture}, proba: {proba.tolist()}")
 
                 self.trigger_action(gesture)
 
@@ -179,7 +196,7 @@ class GestureControlMain(QMainWindow):
 
     def classify_gesture(self):
         print(f"Classifying gesture of length: {self.gesture_len()}")
-        pred_gesture, pred_proba = self.centroid_model(torch.unsqueeze(self.transforms(self.gesture_hist), dim=0))
+        pred_gesture, pred_proba = self.few_shot_model(torch.unsqueeze(self.transforms(self.gesture_hist), dim=0))
         return (pred_gesture.item(), pred_proba) if pred_gesture is not None else (None, None)
 
     def handle_save_sample(self, dataset_path):
@@ -201,48 +218,71 @@ class GestureControlMain(QMainWindow):
         self.new_gesture_window.alertUpdateCount(len(csv_files))
 
     def handle_confirm_info(self, sample_info):
-        self.add_edit_gesture(sample_info['name'], sample_info['id'], sample_info['action_path'], sample_info['dataset_path'])
+        self.add_edit_gesture(sample_info['name'], sample_info['idx'], sample_info['action_path'], sample_info['dataset_path'])
         num_files = len(glob.glob(f"{Path(sample_info['dataset_path'])}/*.csv"))
         self.new_gesture_window.alertUpdateCount(num_files)
 
     def handle_dialog_finished(self, result):
         # Delete and recreate centroids for new / modified gesture
-        self.recreate_centroid(self.new_gesture_id)
-        self.new_gesture_id = None
+        if 0 <= self.new_gesture_idx < len(self.gestures):
+            self.recreate_centroid(self.new_gesture_idx)
+            train_acc, cm = self.few_shot_model.do_train()
+            self.update_status(f"Finished training model. Training acc: {train_acc}")
+            self.update_conf_mat(cm)
+        self.new_gesture_idx = None
 
-    def recreate_centroid(self, id):
-        gesture, _ = self.get_gesture_by_id(id)
+    def update_status(self, txt):
+        self.status_box.setText(txt)
+
+    def update_conf_mat(self, cm):
+        # convert the confusion matrix to a pandas DataFrame and plot it using seaborn
+        plt.figure(figsize=(5, 3.5))
+
+        gesture_names = [x['name'] for x in self.gestures]
+        cm_df = pd.DataFrame(cm, index=gesture_names, columns=gesture_names)
+        ax = sns.heatmap(cm_df, annot=True, cmap='Blues', fmt='g')
+        fig = ax.get_figure()
+        fig.canvas.draw()
+
+        self.conf_mat_scene.clear()
+        self.conf_mat_scene.addWidget(FigureCanvas(fig))
+
+        self.conf_mat.setSceneRect(0, 0, 500, 350)
+        # self.conf_mat.fitInView(self.conf_mat_scene.sceneRect(), QtCore.Qt.KeepAspectRatio)
+
+    def recreate_centroid(self, idx):
+        print(f"Recreate centroid: {idx}")
+        gesture = self.get_gesture_by_idx(idx)
         assert gesture is not None
 
         # Delete centroid if exists
-        _ = self.centroid_model.delete_centroid_if_exists(id)
+        deleted_idx = self.few_shot_model.delete_centroid_if_exists(idx)
 
         # Create centroid anew
         dfs = [pd.read_csv(csv_path) for csv_path in glob.glob(f"{Path(gesture['dataset'])}/*.csv")]
         for df in dfs:
             data = torch.from_numpy(df.values).unsqueeze(dim=0)
-            self.centroid_model.learn_centroid(data, class_num=id)
+            self.few_shot_model.add_data_for_class(data, class_num=idx)
 
-    def add_edit_gesture(self, name, id, action, dataset):
-        gesture, gesture_idx = self.get_gesture_by_id(id)
+    def add_edit_gesture(self, name, idx, action, dataset):
+        gesture = self.get_gesture_by_idx(idx)
         if gesture is None:
-            self.gestures.append({'name': name, 'id': id, 'action': action, 'dataset': dataset})
+            self.gestures.append({'name': name, 'action': action, 'dataset': dataset})
             row_position = self.gestures_table.rowCount()
+            assert row_position == len(self.gestures) - 1
             self.gestures_table.insertRow(row_position)
-            self.gestures_table.setItem(row_position, 0, QTableWidgetItem(str(id)))
-            self.gestures_table.setItem(row_position, 1, QTableWidgetItem(name))
-            self.gestures_table.setItem(row_position, 2, QTableWidgetItem(action))
-            self.gestures_table.setItem(row_position, 3, QTableWidgetItem(dataset))
+            self.gestures_table.setItem(row_position, 0, QTableWidgetItem(name))
+            self.gestures_table.setItem(row_position, 1, QTableWidgetItem(action))
+            self.gestures_table.setItem(row_position, 2, QTableWidgetItem(dataset))
 
         else:
             gesture['name'] = name
             gesture['action'] = action
             gesture['dataset'] = dataset
 
-            self.gestures_table.setItem(gesture_idx, 0, QTableWidgetItem(str(id)))
-            self.gestures_table.setItem(gesture_idx, 1, QTableWidgetItem(name))
-            self.gestures_table.setItem(gesture_idx, 2, QTableWidgetItem(action))
-            self.gestures_table.setItem(gesture_idx, 3, QTableWidgetItem(dataset))
+            self.gestures_table.setItem(idx, 0, QTableWidgetItem(name))
+            self.gestures_table.setItem(idx, 1, QTableWidgetItem(action))
+            self.gestures_table.setItem(idx, 2, QTableWidgetItem(dataset))
 
         try:
             with open(self.gesture_load_path, 'w') as f:
@@ -253,22 +293,38 @@ class GestureControlMain(QMainWindow):
             logger.setLevel(logging.DEBUG)
             logger.error(e, exc_info=True)
 
-    def get_gesture_by_id(self, id):
-        assert id == int(id)
-        matches = [(i, x) for i, x in enumerate(self.gestures) if x['id'] == id]
-        return (matches[0][1] if len(matches) > 0 else None), matches[0][0] if len(matches) > 0 else None
+    def get_gesture_by_idx(self, idx):
+        assert idx == int(idx)
+        if 0 <= idx < len(self.gestures):
+            return self.gestures[idx]
+        else:
+            return None
 
     def learn_gesture(self, dfs, gesture_num):
         data = torch.stack([self.transforms(df) for df in dfs])
-        self.centroid_model.learn_centroid(data, gesture_num)
+        self.few_shot_model.learn_centroid(data, gesture_num)
 
-    def setup_model(self, checkpoint_path, params_path):
+    def setup_fewshot_model(self, checkpoint_path, params_path):
         with open(params_path, 'r') as f:
             params = json.load(f)
-        self.centroid_model = CentroidModel(**params['model_params'], checkpoint_file=checkpoint_path)
 
-        for gesture in self.gestures:
-            self.recreate_centroid(gesture['id'])
+        self.lm_type = params['lm_type']
+        self.use_clahe = params['use_clahe']
+        self.video_mode = params['video_mode']
+        self.resolution_method = params['resolution_method']
+        self.median_filter = params['median_filter']
+
+        # self.few_shot_model = CentroidModel(**params['model_params'], checkpoint_file=checkpoint_path)
+        # self.few_shot_model = SklearnModel(**params['model_params'], checkpoint_file=checkpoint_path, model=SVC(probability=True))
+        self.few_shot_model = SklearnModel(**params['model_params'], checkpoint_file=checkpoint_path, model=DecisionTreeClassifier(min_samples_leaf=2))
+
+        for idx, gesture in enumerate(self.gestures):
+            self.recreate_centroid(idx)
+
+        if len(self.gestures) > 0:
+            train_acc, cm = self.few_shot_model.do_train()
+            self.update_status(f"Finished training model. Training acc: {train_acc}")
+            self.update_conf_mat(cm)
 
     def trigger_action(self, gesture):
         # Trigger the appropriate action if a gesture is detected
@@ -291,13 +347,12 @@ class GestureControlMain(QMainWindow):
         self.gesture_hist = pd.DataFrame(columns=col_names)
 
     def init_gesture_table(self):
-        for gesture in sorted(self.gestures, key=lambda x: x['id']):
+        for gesture in self.gestures:
             row_position = self.gestures_table.rowCount()
             self.gestures_table.insertRow(row_position)
-            self.gestures_table.setItem(row_position, 0, QTableWidgetItem(str(gesture['id'])))
-            self.gestures_table.setItem(row_position, 1, QTableWidgetItem(gesture['name']))
-            self.gestures_table.setItem(row_position, 2, QTableWidgetItem(gesture['action']))
-            self.gestures_table.setItem(row_position, 3, QTableWidgetItem(gesture['dataset']))
+            self.gestures_table.setItem(row_position, 0, QTableWidgetItem(gesture['name']))
+            self.gestures_table.setItem(row_position, 1, QTableWidgetItem(gesture['action']))
+            self.gestures_table.setItem(row_position, 2, QTableWidgetItem(gesture['dataset']))
 
 
 class NewGestureWindow(QDialog):
@@ -305,7 +360,7 @@ class NewGestureWindow(QDialog):
     save_sample_signal = pyqtSignal(str)
     confirm_info_signal = pyqtSignal(dict)
 
-    def __init__(self, fps, id):
+    def __init__(self, fps, idx, name=None, action=None, dataset=None):
         super().__init__()
         self.setWindowTitle("Create Gesture")
 
@@ -326,7 +381,14 @@ class NewGestureWindow(QDialog):
         self.select_dataset_folder.clicked.connect(self.handle_select_dataset_folder)
         self.save_sample_btn.setEnabled(False)
         self.save_sample_btn.clicked.connect(self.handle_save_sample)
-        self.id_box.setText(str(id))
+        self.idx_box.setText(str(idx))
+
+        if name is not None:
+            self.name_box = name
+        if action is not None:
+            self.action_path_box = action
+        if dataset is not None:
+            self.dataset_path_box = dataset
 
         self.confirm_btn.clicked.connect(self.handle_confirm)
         self.edit_btn.clicked.connect(self.handle_edit)
@@ -349,16 +411,16 @@ class NewGestureWindow(QDialog):
 
     def handle_confirm(self):
         name = self.name_box.text()
-        id = self.id_box.text()
+        idx = self.idx_box.text()
         action_path = self.action_path_box.text()
         dataset_path = self.dataset_path_box.text()
 
         name_is_valid = len(name) > 0
-        id_is_valid = True
+        idx_is_valid = True
         try:
-            _ = int(id)
+            _ = int(idx)
         except:
-            id_is_valid = False
+            idx_is_valid = False
 
         action_path_is_valid = len(action_path) > 0
         try:
@@ -375,14 +437,14 @@ class NewGestureWindow(QDialog):
         errors_lst = []
         if not name_is_valid:
             errors_lst.append("Name must not be blank!")
-        if not id_is_valid:
-            errors_lst.append("ID is invalid!")
+        if not idx_is_valid:
+            errors_lst.append("Index is invalid!")
         if not action_path_is_valid:
             errors_lst.append("Action path is invalid!")
         if not ds_path_is_valid:
             errors_lst.append("Dataset path is invalid!")
 
-        if name_is_valid and id_is_valid and action_path_is_valid and ds_path_is_valid:
+        if name_is_valid and idx_is_valid and action_path_is_valid and ds_path_is_valid:
             self.save_sample_btn.setEnabled(True)
             self.name_box.setEnabled(False)
             self.action_path_box.setEnabled(False)
@@ -390,7 +452,7 @@ class NewGestureWindow(QDialog):
             self.select_macro.setEnabled(False)
             self.select_dataset_folder.setEnabled(False)
             self.confirm_info_signal.emit(
-                {'name': name, 'id': int(id), 'action_path': action_path, 'dataset_path': dataset_path})
+                {'name': name, 'idx': int(idx), 'action_path': action_path, 'dataset_path': dataset_path})
         else:
             self.status_browser.setText("\n".join(errors_lst))
 

@@ -1,9 +1,14 @@
+import abc
+import functools
 import warnings
+from abc import ABC
+from collections import defaultdict
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from collections import defaultdict
+from sklearn.metrics import confusion_matrix
 
 
 # Create RNN Model
@@ -35,7 +40,7 @@ class RNNModel(torch.nn.Module):
         output, (hn, cn) = self.rnn(x, (h0, c0))
 
         # average over sequence
-        avg_hidden = torch.mean(output,dim=1)
+        avg_hidden = torch.mean(output, dim=1)
         return self.fc(avg_hidden)
 
 
@@ -67,20 +72,20 @@ class AttentionRNNModel(torch.nn.Module):
         c0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to(self.device)
 
         # (batch_size,sequence length) since we want a weight for each hidden state in the sequence
-        attention_weights = torch.zeros((x.shape[0],x.shape[1])).to(self.device)
+        attention_weights = torch.zeros((x.shape[0], x.shape[1])).to(self.device)
 
         # output shape is (batch size, sequence length, feature dim)
         output, (hn, cn) = self.rnn(x, (h0, c0))
 
         # for each time step, get the attention weight (do this over the batch)
         for i in range(x.shape[1]):
-            attention_weights[:,i] = self.attention(output[:,i,:]).view(-1)
-        attention_weights = F.softmax(attention_weights,dim=1)
+            attention_weights[:, i] = self.attention(output[:, i, :]).view(-1)
+        attention_weights = F.softmax(attention_weights, dim=1)
 
         # apply attention weights for each element in batch
-        attended = torch.zeros(output.shape[0],output.shape[2]).to(self.device)
+        attended = torch.zeros(output.shape[0], output.shape[2]).to(self.device)
         for i in range(x.shape[0]):
-            attended[i,:] = attention_weights[i]@output[i,:,:]
+            attended[i, :] = attention_weights[i] @ output[i, :, :]
 
         return self.fc(attended)
 
@@ -118,12 +123,13 @@ class RNNFeatureExtractor(nn.Module):
         return output
 
 
-class CentroidModel(nn.Module):
+class FewShotModel(nn.Module, ABC):
     def __init__(self, input_dim, hidden_dim, latent_dim, layer_dim, rnn_type, rnn_use_last, checkpoint_file=None, device='cuda'):
-        super().__init__()
+        super(FewShotModel, self).__init__()
         self.checkpoint_file = checkpoint_file
         self.device = device
-        self.fe_model = RNNFeatureExtractor(input_dim=input_dim, hidden_dim=hidden_dim, latent_dim=latent_dim, layer_dim=layer_dim, rnn_type=rnn_type, rnn_use_last=rnn_use_last, device=device).to(device)
+        self.fe_model = RNNFeatureExtractor(input_dim=input_dim, hidden_dim=hidden_dim, latent_dim=latent_dim, layer_dim=layer_dim, rnn_type=rnn_type, rnn_use_last=rnn_use_last,
+                                            device=device).to(device)
 
         if self.checkpoint_file:
             checkpoint = torch.load(self.checkpoint_file)
@@ -132,15 +138,106 @@ class CentroidModel(nn.Module):
         else:
             warnings.warn("Checkpoint not specified, loading untrained model!")
 
-        # Centroids
-        self.centroids = defaultdict(lambda: torch.zeros(latent_dim).to(self.device))
-        self.class_counts = defaultdict(lambda: 0)
-
     def get_embeddings(self, x):
         with torch.no_grad():
             x = x.to(self.device)
             embeddings = self.fe_model(x)
         return embeddings
+
+    @abc.abstractmethod
+    def forward(self, x):
+        pass
+
+    @abc.abstractmethod
+    def num_classes(self):
+        pass
+
+    @abc.abstractmethod
+    def delete_centroid_if_exists(self, class_num):
+        pass
+
+    @abc.abstractmethod
+    def add_data_for_class(self, data, class_num):
+        pass
+
+    @abc.abstractmethod
+    def do_train(self):
+        pass
+
+
+class SklearnModel(FewShotModel):
+
+    def __init__(self, input_dim, hidden_dim, latent_dim, layer_dim, rnn_type, rnn_use_last, checkpoint_file=None, device='cuda', model=None):
+        super().__init__(input_dim, hidden_dim, latent_dim, layer_dim, rnn_type, rnn_use_last, checkpoint_file=checkpoint_file, device='cuda')
+        self.device = device
+
+        assert model is not None
+        self.model = model
+        self.model_invalid = True
+        self.data_by_class = {}
+        self.class_idx2class_num = {}
+
+    def forward(self, x):
+        assert not self.model_invalid
+        embeddings = self.get_embeddings(x).cpu().numpy()
+        pred_proba = self.model.predict_proba(embeddings)
+
+        assert functools.reduce(lambda i, j: i and j, map(lambda m, k: m == k, self.get_class_nums_sorted(), list(self.model.classes_)), True)
+        return np.argmax(pred_proba, axis=1), pred_proba
+
+    def num_classes(self):
+        return len(self.data_by_class)
+
+    def delete_centroid_if_exists(self, class_num):
+        self.model_invalid = True
+        if class_num in self.data_by_class:
+            del self.data_by_class[class_num]
+            return class_num
+        return None
+
+    def add_data_for_class(self, data, class_num):
+        self.model_invalid = True
+        embeddings = self.get_embeddings(data)
+        embeddings = embeddings.cpu().numpy()
+
+        if class_num in self.data_by_class:
+            self.data_by_class[class_num] = np.concatenate([self.data_by_class[class_num], embeddings], axis=0)
+        else:
+            self.data_by_class[class_num] = embeddings
+
+    def get_class_nums_sorted(self):
+        return sorted(self.data_by_class.keys())
+
+    def do_train(self):
+        print("Training Model")
+        self.model_invalid = False
+
+        all_data = [self.data_by_class[class_num] for class_num in self.get_class_nums_sorted()]
+        all_targets = [(torch.ones(all_data[class_idx].shape[0]) * class_num).long().numpy() for class_idx, class_num in enumerate(self.get_class_nums_sorted())]
+        self.class_idx2class_num = {class_idx: class_num for class_idx, class_num in enumerate(self.get_class_nums_sorted())}
+
+        # Concat into one np array
+        all_data = np.concatenate(all_data, axis=0)
+        all_targets = np.concatenate(all_targets, axis=0)
+
+        self.model.fit(all_data, all_targets)
+        train_acc = self.model.score(all_data, all_targets)
+
+        y_pred = self.model.predict(all_data)
+        cm = confusion_matrix(all_targets, y_pred)
+
+        print(f"Train acc: {train_acc}")
+        return train_acc, cm
+
+
+class CentroidModel(FewShotModel):
+    def __init__(self, input_dim, hidden_dim, latent_dim, layer_dim, rnn_type, rnn_use_last, checkpoint_file=None, device='cuda'):
+        super().__init__(input_dim, hidden_dim, latent_dim, layer_dim, rnn_type, rnn_use_last, checkpoint_file=checkpoint_file, device='cuda')
+        self.device = device
+
+        # Centroids
+        self.centroids = defaultdict(lambda: torch.zeros(latent_dim).to(self.device))
+        self.class_counts = defaultdict(lambda: 0)
 
     def forward(self, x):
         if self.num_classes() <= 0:
@@ -163,16 +260,26 @@ class CentroidModel(nn.Module):
         else:
             return None
 
-    def learn_centroid(self, x, class_num):
+    def add_data_for_class(self, x, class_num):
         embeddings = self.get_embeddings(x)
         self.centroids[class_num] = (self.centroids[class_num] * self.class_counts[class_num] + embeddings.mean(dim=0)) / (self.class_counts[class_num] + embeddings.size(0))
         self.class_counts[class_num] += embeddings.size(0)
+
+    def do_train(self):
+        print("Training model")
 
     def _dont_call_this(self, x, class_num):
         x = x.cuda()
 
         self.centroids[class_num] = (self.centroids[class_num] * self.class_counts[class_num] + x.sum(dim=0)) / (self.class_counts[class_num] + x.size(0))
         self.class_counts[class_num] += x.size(0)
+
+    def _dont_call_this_forward(self, x):
+        centroids, class_nums = self.get_centroids_as_tensor()
+        dists = self.euclidean_dist(x, centroids)
+        closest_class_idxs = dists.argmin(dim=1)
+        decoded_class_nums = class_nums.to(self.device).gather(0, closest_class_idxs)
+        return decoded_class_nums, F.softmax(-dists, dim=1)
 
     def get_centroids_as_tensor(self):
         """
@@ -194,7 +301,6 @@ class CentroidModel(nn.Module):
 
         return centroids, torch.Tensor(class_num_lst).long()
 
-
     def euclidean_dist(self, x, y):
         '''
         Compute euclidean distance between two tensors
@@ -211,21 +317,6 @@ class CentroidModel(nn.Module):
         y = y.unsqueeze(0).expand(n, m, d)
 
         return torch.pow(x - y, 2).sum(2)
-
-# class RNNTest(nn.Module):
-#     def __init__(self, input_dim, hidden_dim, latent_dim, layer_dim, output_dim, device):
-#         super(RNNTest, self).__init__()
-#         self.feature_extractor = RNNFeatureExtractor(input_dim=input_dim, hidden_dim=hidden_dim, latent_dim=latent_dim,
-#                                                      layer_dim=layer_dim, device=device)
-#         self.fc = nn.Linear(latent_dim, output_dim)
-#         self.relu = nn.ReLU()
-#
-#     def forward(self, x):
-#         x = self.feature_extractor(x)
-#         x = self.relu(x)
-#         x = self.fc(x)
-#         return x
-
 
 
 class TransformerFeatureExtractor(nn.Module):
@@ -272,6 +363,7 @@ class TransformerClassifier(nn.Module):
         # x = F.softmax(x, dim=1)
         return x
 
+
 if __name__ == '__main__':
     model = CentroidModel(input_dim=63, layer_dim=1, latent_dim=10, hidden_dim=128, rnn_type='GRU', rnn_use_last=False)
 
@@ -281,13 +373,26 @@ if __name__ == '__main__':
     print()
     data = torch.rand((200, 10))
     model._dont_call_this(data * 0, 0)
+    # model._dont_call_this(data * 0 + 1, 0)
     model._dont_call_this(data * 0 + 1, 1)
+    model._dont_call_this(data * 0 + 2, 1)
     model._dont_call_this(data * 0 + 2, 2)
+    model._dont_call_this(data * 0 + 3, 2)
     model._dont_call_this(data * 0 + 3, 3)
+    model._dont_call_this(data * 0 + 4, 3)
     model._dont_call_this(data * 0 + 4, 4)
+
+    model.delete_centroid_if_exists(0)
+
+    model._dont_call_this(data * 0, 0)
+    model._dont_call_this(data * 0 + 1, 0)
 
     centroids, vals = model.get_centroids_as_tensor()
     print()
 
-    data = torch.rand((200, 80, 63)) * 4
-    print(model(data))
+    # data = torch.rand((200, 80, 63)) * 4
+    # print(model(data))
+
+    data = torch.rand((1, 10)) + .5
+    pred, proba = model._dont_call_this_forward(data.cuda())
+    print()
