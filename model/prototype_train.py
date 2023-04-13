@@ -218,6 +218,11 @@ if __name__ == '__main__':
         params['augment_angles'] = trial.suggest_categorical('augment_angles', [True, False]) if lm_type != 'wp' else False
         params['save_model_ckpt'] = save_checkpoint
 
+        params['lm_type'] = lm_type
+        params['use_clahe'] = use_clahe
+        params['video_mode'] = video_mode
+        params['resolution_method'] = resolution_method
+
         return params
 
 
@@ -288,13 +293,15 @@ if __name__ == '__main__':
 
     # optuna_params = {"augment_angles": True, "batch_size": 245, "hidden_dim": 318, "latent_dim": 13, "layer_dim": 2, "lm_type": "w", "loss_min_count": 4, "lr": 0.008017771856893249, "optimizer": "Adam", "resolution_method": "f", "rnn_type": "LSTM", "rnn_use_last": False, "use_clahe": 0,
     #                  "video_mode": 1}
-    optuna_params = {"augment_angles": True, "batch_size": 192, "hidden_dim": 103, "latent_dim": 61, "layer_dim": 1, "lm_type": "w", "loss_min_count": 4, "lr": 0.002695153477672442, "optimizer": "Adam", "resolution_method": "f", "rnn_type": "GRU", "use_clahe": 0, "video_mode": 1, 'rnn_use_last': False}
+    # optuna_params = {"augment_angles": True, "batch_size": 192, "hidden_dim": 103, "latent_dim": 61, "layer_dim": 1, "lm_type": "w", "loss_min_count": 4, "lr": 0.002695153477672442, "optimizer": "Adam", "resolution_method": "f", "rnn_type": "GRU", "use_clahe": 0, "video_mode": 1, 'rnn_use_last': False}
+
+    optuna_params = {"batch_size": 149, "hidden_dim": 393, "latent_dim": 76, "layer_dim": 2, "lm_type": "wp", "loss_min_count": 2, "lr": 0.0016366085062888454, "optimizer": "Adam", "resolution_method": "z", "rnn_type": "GRU", "rnn_use_last": True, "use_clahe": 1, "video_mode": 0}
 
     fake_trial = FakeTrial(optuna_params)
 
-    params = suggest_params(fake_trial, save_checkpoint=True, log_name="ProtomodelTrain")
+    params = suggest_params(fake_trial, save_checkpoint=True, log_name="ProtomodelTrain3")
 
-    with open(f"models/protomodel_params.json", "w") as f:
+    with open(f"models/protomodel_params3.json", "w") as f:
         json.dump(params, f)
     print(params)
     print("=========================================")

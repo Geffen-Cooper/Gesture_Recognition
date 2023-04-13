@@ -34,9 +34,7 @@ class HandPoseModel(nn.Module):
         self.filter_handedness = filter_handedness
         self.draw_pose = draw_pose
 
-        if lm_type == "n":
-            warnings.warn(f"Using lm_type n!")
-        assert lm_type in ("n", "w")
+        assert lm_type in ("n", "w", "wp")
         self.lm_type = lm_type
 
         # measure FPS
@@ -89,16 +87,27 @@ class HandPoseModel(nn.Module):
                             self.mp_drawing_styles.get_default_hand_landmarks_style(),
                             self.mp_drawing_styles.get_default_hand_connections_style())
                         image.flags.writeable = False
-                    # Convert landmarks into vector
-                    lm_list_x = []
-                    lm_list_y = []
-                    lm_list_z = []
 
-                    landmarks_to_use = hand_landmarks if self.lm_type == "n" else world_hand_landmarks
-                    for lm in landmarks_to_use.landmark:
-                        lm_list_x.append(lm.x)
-                        lm_list_y.append(lm.y)
-                        lm_list_z.append(lm.z)
+                    # Convert landmarks into vector
+                    if self.lm_type == "n":
+                        lm_list_x, lm_list_y, lm_list_z = [], [], []
+                        TO_SKIP = {}
+                        landmarks_to_use = hand_landmarks
+                    elif self.lm_type == "w":
+                        lm_list_x, lm_list_y, lm_list_z = [], [], []
+                        TO_SKIP = {}
+                        landmarks_to_use = world_hand_landmarks
+                    elif self.lm_type == "wp":
+                        wrist_lm = hand_landmarks.landmark[self.mp_hands.HandLandmark.WRIST]
+                        lm_list_x, lm_list_y, lm_list_z = [wrist_lm.x], [wrist_lm.y], [wrist_lm.z]
+                        TO_SKIP = {self.mp_hands.HandLandmark.PINKY_DIP}
+                        landmarks_to_use = world_hand_landmarks
+
+                    for lm_idx, lm in enumerate(landmarks_to_use.landmark):
+                        if lm_idx not in TO_SKIP:
+                            lm_list_x.append(lm.x)
+                            lm_list_y.append(lm.y)
+                            lm_list_z.append(lm.z)
 
                     frame_landmark_vector = torch.Tensor([lm_list_x + lm_list_y + lm_list_z])
                     result_vectors.append(frame_landmark_vector)
