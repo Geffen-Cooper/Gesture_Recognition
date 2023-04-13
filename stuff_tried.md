@@ -1,12 +1,15 @@
 # List of stuff tried
-- Hyperparameter optimization
+- Hyperparameter optimization (show optuna dashboard screenshot)
 - LSTM
 - RNN
+- GRU
 - Transformer
+- w, wp, n feature types
+- Prototypical loss
+- Create own dataset
 
 # To try
-- GRU?
+- Train on own dataset?
 
 # In progress
-- Create our own dataset
-- Prototypical loss
+- GUI

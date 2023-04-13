@@ -1,19 +1,23 @@
+import json
 import logging
 import os
 import random
 import time
 from pathlib import Path
+from typing import Sequence, overload, Optional
 
 import numpy as np
 import optuna
 import torch
 from optuna._callbacks import RetryFailedTrialCallback
+from optuna.distributions import CategoricalChoiceType
 from torch.utils.tensorboard import SummaryWriter
 
 from model.PrototypeLoss import PrototypicalLoss
 from model.datasets import load_nvgesture
 from model.models import RNNModel, RNNFeatureExtractor
 from utils.utils import ignore_unmatched_kwargs
+
 
 @ignore_unmatched_kwargs
 def train_prototype(loss_min_count=2, from_checkpoint=None, optimizer="AdamW", log_name="default", root_dir="ds", batch_size=128, epochs=200, ese=20, lr=1e-4, use_cuda=True, seed=42, subset=None, median_filter=False, augment_angles=False, model_type="RNN", model_params=None, save_model_ckpt=False):
@@ -75,7 +79,6 @@ def train_prototype(loss_min_count=2, from_checkpoint=None, optimizer="AdamW", l
         best_val_acc = 0
         lowest_loss = 1e6
 
-
     model.train()
     model = model.to(device)
     batch_iter = 0
@@ -97,7 +100,7 @@ def train_prototype(loss_min_count=2, from_checkpoint=None, optimizer="AdamW", l
 
             # Log Stuff
             if (batch_iter % 10) == 0:
-                print(f'Train Epoch: {epoch} [{batch_idx * len(data)}/{len(train_loader.dataset)} ({100.0 * batch_idx / len(train_loader):.0f}%)] train loss: {train_loss:.3f} train acc: {train_acc*100:.3f}%')
+                print(f'Train Epoch: {epoch} [{batch_idx * len(data)}/{len(train_loader.dataset)} ({100.0 * batch_idx / len(train_loader):.0f}%)] train loss: {train_loss:.3f} train acc: {train_acc * 100:.3f}%')
             writer.add_scalar("Metric/train_loss", train_loss, batch_iter)
 
         if num_epochs_worse >= ese:
@@ -110,7 +113,7 @@ def train_prototype(loss_min_count=2, from_checkpoint=None, optimizer="AdamW", l
         writer.add_scalar("Metric/val_acc", val_acc, epoch)
         writer.add_scalar("Metric/val_loss", val_loss, epoch)
 
-        print(f'Train Epoch: {epoch} [{batch_idx * len(data)}/{len(train_loader.dataset)} ({100.0 * batch_idx / len(train_loader):.0f}%)] train loss: {train_loss:.3f}, val acc: {val_acc*100:.3f}%, val loss: {val_loss:.3f}')
+        print(f'Train Epoch: {epoch} [{batch_idx * len(data)}/{len(train_loader.dataset)} ({100.0 * batch_idx / len(train_loader):.0f}%)] train loss: {train_loss:.3f}, val acc: {val_acc * 100:.3f}%, val loss: {val_loss:.3f}')
 
         # Check ESE
         if best_val_acc < val_acc:
@@ -139,7 +142,7 @@ def train_prototype(loss_min_count=2, from_checkpoint=None, optimizer="AdamW", l
     model.eval()
     test_acc, test_loss = validate(model, test_loader, device, loss)
 
-    print('test acc: {:.3f}%, test loss: {:.3f}'.format(test_acc*100, test_loss))
+    print('test acc: {:.3f}%, test loss: {:.3f}'.format(test_acc * 100, test_loss))
     writer.add_scalar("Metric/test_acc", test_acc, epoch)
     writer.add_text("test_accuracy", f"{test_acc}")
 
@@ -147,6 +150,7 @@ def train_prototype(loss_min_count=2, from_checkpoint=None, optimizer="AdamW", l
         os.remove(checkpoint_path)
 
     return test_acc, test_loss
+
 
 def validate(model, val_loader, device, loss_fn):
     model.eval()
@@ -173,26 +177,15 @@ def validate(model, val_loader, device, loss_fn):
 
         return val_acc, val_loss
 
+
 if __name__ == '__main__':
-    # model_params = dict(input_dim=63, hidden_dim=256, latent_dim=64, layer_dim=1, device='cuda')
-    # params = {"loss": "CE", "from_checkpoint": None, "log_name": "prototype_v0", 'epochs': 400, 'ese': 20, 'use_cuda': True, 'seed': 42, 'subset': None, "augment_angles": True, "batch_size": 213, "lm_type": "w", "lr": 0.0068914481421098244, "median_filter": False, "save_model_ckpt": False, "model_type": "RNN", "optimizer": "AdamW", "resolution_method": "f", "sensor": "c", "use_clahe": 0, "video_mode": 1}
-    # params['root_dir'] = f"../csvs/ds_L{params['lm_type']}_S{params['sensor']}_C{params['use_clahe']}_V{params['video_mode']}_R{params['resolution_method']}"
-    # params['model_params'] = model_params
-    #
-    # test_acc, test_loss = train(**params)
-    # print(f"My model: {test_acc*100:.4f}%, loss: {test_loss}")
-
-
-    model_params = dict(input_dim=63, hidden_dim=256, latent_dim=64, layer_dim=1, device='cuda')
-    params = dict(loss_min_count=2, from_checkpoint=None, optimizer="AdamW", log_name="default", root_dir="ds", batch_size=128, epochs=200, ese=20, lr=1e-4, use_cuda=True, seed=42, subset=None, median_filter=False, augment_angles=False, model_type="RNN", model_params=None, save_model_ckpt=False)
-
-    def suggest_params(trial: optuna.Trial):
+    def suggest_params(trial: optuna.Trial = None, save_checkpoint=False, log_name=None):
         # Model params
         model_params = dict()
         model_params['input_dim'] = 63
         model_params['hidden_dim'] = trial.suggest_int('hidden_dim', 64, 400)  # 256
         model_params['latent_dim'] = trial.suggest_int('latent_dim', 10, 128)  # 64
-        model_params['layer_dim'] = trial.suggest_int('layer_dim', 1, 2) # 1
+        model_params['layer_dim'] = trial.suggest_int('layer_dim', 1, 2)  # 1
         model_params['rnn_type'] = trial.suggest_categorical('rnn_type', ["GRU", "LSTM"])
         model_params['rnn_use_last'] = trial.suggest_categorical('rnn_use_last', [False, True])
         model_params['device'] = 'cuda'
@@ -205,13 +198,12 @@ if __name__ == '__main__':
         resolution_method = trial.suggest_categorical("resolution_method", ['z', 'f'])  # ['i', 'z', 'f']
         ds_name = f"ds_L{lm_type}_S{sensor}_C{use_clahe}_V{video_mode}_R{resolution_method}"
 
-
         # Train params
         params = dict()
         params['loss_min_count'] = trial.suggest_int('loss_min_count', 2, 4)
         params['from_checkpoint'] = None
         params['optimizer'] = trial.suggest_categorical('optimizer', ["AdamW", "Adam", "SGD"])
-        params['log_name'] = f"proto_{trial.number}"
+        params['log_name'] = f"proto_{trial.number}" if log_name is None else log_name
         params['root_dir'] = f"../csvs/{ds_name}"
         params['batch_size'] = trial.suggest_int('batch_size', 100, 256)
         params['epochs'] = 400
@@ -224,45 +216,88 @@ if __name__ == '__main__':
         params['model_params'] = model_params
         params['median_filter'] = False
         params['augment_angles'] = trial.suggest_categorical('augment_angles', [True, False]) if lm_type != 'wp' else False
-        params['save_model_ckpt'] = False
+        params['save_model_ckpt'] = save_checkpoint
 
         return params
 
 
-    def objective(trial):
-        params = suggest_params(trial)
-        try:
-            test_acc, test_loss = train_prototype(**params)
-            torch.cuda.empty_cache()
-        except Exception as e:
-            for i in range(10):
-                print()
-            logger = logging.getLogger()
-            logger.setLevel(logging.DEBUG)
-            logger.error(str(e), exc_info=True)
-            return float('nan')
-        return test_loss, test_acc
+    # def objective(trial):
+    #     params = suggest_params(trial)
+    #     try:
+    #         test_acc, test_loss = train_prototype(**params)
+    #         torch.cuda.empty_cache()
+    #     except Exception as e:
+    #         for i in range(10):
+    #             print()
+    #         logger = logging.getLogger()
+    #         logger.setLevel(logging.DEBUG)
+    #         logger.error(str(e), exc_info=True)
+    #         return float('nan')
+    #     return test_loss, test_acc
+    #
+    # ##### SQL Server #####
+    # user = "admin"
+    # password = "plzdonthackme"
+    # url = "optuna.czje4evrsrqy.us-east-2.rds.amazonaws.com"
+    # database = "db1"
+    # ######################
+    #
+    # STUDY_NAME = "prototype_study_v0"
+    #
+    # storage = optuna.storages.RDBStorage(
+    #     # url="sqlite:///:memory:",
+    #     url=f"mysql://{user}:{password}@{url}/{database}",
+    #     heartbeat_interval=60,
+    #     grace_period=120,
+    #     failed_trial_callback=RetryFailedTrialCallback(max_retry=3),
+    # )
+    #
+    # print(f"SQL URL: mysql://{user}:{password}@{url}/{database}")
+    # print()
+    #
+    # sampler = optuna.samplers.TPESampler(multivariate=True, group=True, constant_liar=True)
+    # study = optuna.create_study(study_name=STUDY_NAME, sampler=sampler, storage=storage, load_if_exists=True, directions=['minimize', 'maximize'])
+    # study.optimize(objective, timeout=3600 * 10, gc_after_trial=True)
 
-    ##### SQL Server #####
-    user = "admin"
-    password = "plzdonthackme"
-    url = "optuna.czje4evrsrqy.us-east-2.rds.amazonaws.com"
-    database = "db1"
-    ######################
+    class FakeTrial:
+        def __init__(self, params):
+            super(FakeTrial, self).__init__()
+            self.found_params = params
 
-    STUDY_NAME = "prototype_study_v0"
+        def get_param(self, name):
+            return self.found_params[name]
 
-    storage = optuna.storages.RDBStorage(
-        # url="sqlite:///:memory:",
-        url=f"mysql://{user}:{password}@{url}/{database}",
-        heartbeat_interval=60,
-        grace_period=120,
-        failed_trial_callback=RetryFailedTrialCallback(max_retry=3),
-    )
+        def suggest_float(self, name: str, low: float, high: float, *, step: Optional[float] = None, log: bool = False) -> float:
+            return self.get_param(name)
 
-    print(f"SQL URL: mysql://{user}:{password}@{url}/{database}")
-    print()
+        def suggest_uniform(self, name: str, low: float, high: float) -> float:
+            return self.get_param(name)
 
-    sampler = optuna.samplers.TPESampler(multivariate=True, group=True, constant_liar=True)
-    study = optuna.create_study(study_name=STUDY_NAME, sampler=sampler, storage=storage, load_if_exists=True, directions=['minimize', 'maximize'])
-    study.optimize(objective, timeout=3600 * 10, gc_after_trial=True)
+        def suggest_loguniform(self, name: str, low: float, high: float) -> float:
+            return self.get_param(name)
+
+        def suggest_discrete_uniform(self, name: str, low: float, high: float, q: float) -> float:
+            return self.get_param(name)
+
+        def suggest_int(self, name: str, low: int, high: int, step: int = 1, log: bool = False) -> int:
+            return self.get_param(name)
+
+        def suggest_categorical(self, name, choices):
+            return self.get_param(name)
+
+
+    # optuna_params = {"augment_angles": True, "batch_size": 245, "hidden_dim": 318, "latent_dim": 13, "layer_dim": 2, "lm_type": "w", "loss_min_count": 4, "lr": 0.008017771856893249, "optimizer": "Adam", "resolution_method": "f", "rnn_type": "LSTM", "rnn_use_last": False, "use_clahe": 0,
+    #                  "video_mode": 1}
+    optuna_params = {"augment_angles": True, "batch_size": 192, "hidden_dim": 103, "latent_dim": 61, "layer_dim": 1, "lm_type": "w", "loss_min_count": 4, "lr": 0.002695153477672442, "optimizer": "Adam", "resolution_method": "f", "rnn_type": "GRU", "use_clahe": 0, "video_mode": 1, 'rnn_use_last': False}
+
+    fake_trial = FakeTrial(optuna_params)
+
+    params = suggest_params(fake_trial, save_checkpoint=True, log_name="ProtomodelTrain")
+
+    with open(f"models/protomodel_params.json", "w") as f:
+        json.dump(params, f)
+    print(params)
+    print("=========================================")
+
+    test_acc, test_loss = train_prototype(**params)
+    print(test_acc, test_loss)
