@@ -267,15 +267,16 @@ def generate_embeddings(test_loader,model,tb_writer,model_type,device,hidden_siz
             embds = activation['emb'].squeeze(1).to('cpu')
 
             # get the labels
-            halfway = len(test_loader.dataset.datasets[0])
+            # halfway = len(test_loader.dataset.datasets[0])
             batch_label_strings = []
             for idx,label in enumerate(batch_labels):
-                if idx >= halfway:
-                    dir = os.path.basename(Path(test_loader.dataset.datasets[1].img_paths[idx-halfway]).parents[1])
-                    batch_label_strings.append(str(label.item())+"_"+dir)
-                else:
-                    dir = os.path.basename(Path(test_loader.dataset.datasets[0].img_paths[idx-halfway]).parents[1])
-                    batch_label_strings.append(str(label.item())+"_"+dir)
+                batch_label_strings.append(str(label.item()))
+                # if idx >= halfway:
+                #     dir = os.path.basename(Path(test_loader.dataset.datasets[1].img_paths[idx-halfway]).parents[1])
+                #     batch_label_strings.append(str(label.item())+"_"+dir)
+                # else:
+                #     dir = os.path.basename(Path(test_loader.dataset.datasets[0].img_paths[idx-halfway]).parents[1])
+                #     batch_label_strings.append(str(label.item())+"_"+dir)
 
             # store embeddings to tensorboard
             tb_writer.add_embedding(embds,metadata=batch_label_strings)
@@ -307,9 +308,9 @@ def generate_embeddings(test_loader,model,tb_writer,model_type,device,hidden_siz
 # ===================================== Main =====================================
 if __name__ == "__main__":
 
-    train_params = {'loss': "CE", 'from_checkpoint': None, 'optimizer': "AdamW", 'log_name': "collected", 'root_dir': ["../csvs/collected_data","../csvs/top"],
-                    'batch_size': 64, 'epochs': 50, 'ese': 1, 'lr': 0.002, 'use_cuda': True, 'seed': 42, 'subset': tuple(np.arange(25)), 'median_filter': False, 'augment_angles': True,
-                    'model_type': "AttentionRNN", 'model_hidden_dim_size_rnn': 256, 'model_hidden_dim_size_trans': 276, 'save_model_ckpt': True,
+    train_params = {'loss': "CE", 'from_checkpoint': None, 'optimizer': "AdamW", 'log_name': "collected", 'root_dir': "../csvs/collected_data",
+                    'batch_size': 64, 'epochs': 50, 'ese': 10, 'lr': 0.0015, 'use_cuda': True, 'seed': 42, 'subset': tuple(np.arange(25)), 'median_filter': False, 'augment_angles': True,
+                    'model_type': "RNN", 'model_hidden_dim_size_rnn': 256, 'model_hidden_dim_size_trans': 276, 'save_model_ckpt': True,
                     'model_num_layers_trans': 1, 'model_num_heads_trans': 6}
 
     train(**train_params)

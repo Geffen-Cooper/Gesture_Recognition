@@ -135,3 +135,4 @@ data/nvGesture_v1/*
 data/UCF101_subset/*
 csvs/*
 !csvs/generated_csvs.zip
+!csvs/collected_data
