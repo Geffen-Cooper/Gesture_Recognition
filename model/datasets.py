@@ -9,6 +9,7 @@ import numpy as np
 import re
 from scipy.spatial.transform import Rotation
 import torch.nn.utils.rnn as rnn_utils
+from torch.utils.data.sampler import Sampler
 
 class Gestures(Dataset):
     def __init__(self, root_dir, transform=None, train=True, test=False, subset=None):
@@ -102,6 +103,60 @@ class Gestures(Dataset):
                 ax_array[i, j].set_yticks([])
         plt.show()
 
+
+
+# this class is used to sample items of each class from the dataset equally and randomly
+# Example: let's say the dataset is listed like this [C0 (0), C0 (1), C0 (2), C1 (3), C1 (4), C1 (5), C2 (6), C2 (7), C2 (8)],
+# the sampler might return the idxs like this: [2 (C0), 3 (C1), 8 (C2), 0 (C0), 4 (C1), 7 (C2), 1 (C0), 5 (C1), 6 (C2)]
+class EvenSampler(Sampler):
+    def __init__(self, dataset,shot=-1):
+        # get the labels as a tensor
+        self.labels = torch.Tensor(dataset.labels)
+
+        # how many samples from each class to use
+        self.shot = shot
+
+        # count the number of classes
+        self.num_classes = len(torch.unique(self.labels))
+
+        # get the idxs of each class as a nested list --> [[0,1,2,3],[4,5,6]]
+        self.class_idxs = []
+        self.remain_class_idxs = []
+        self.class_idx_lens = []
+        for c in range(self.num_classes):
+            # if we specify a shot then only use a subset of the samples per class
+            if self.shot != -1:
+                idxs = torch.flatten((self.labels == c).nonzero())[0:self.shot]
+                remain = torch.flatten((self.labels == c).nonzero())[self.shot:]
+                self.remain_class_idxs.append(remain) # need to use this to index into imgs and labels for the valid set
+            else:
+                idxs = torch.flatten((self.labels == c).nonzero())
+            self.class_idxs.append(idxs)
+            self.class_idx_lens.append(idxs.size(0))
+        self.max_len = max(self.class_idx_lens)
+        self.min_len = min(self.class_idx_lens)
+        
+    def __iter__(self):
+        # shuffle the idxs for each class idx list --> [[1,0,2,3],[5,6,4]]
+        # also periodically extend the shorter lists --> [[1,0,2,3],[5,6,4,5]]
+        # or cuts down the longer lists --> [[1,0,2],[5,6,4]]
+        for i,c in enumerate(self.class_idxs):
+            rand_idx = torch.randperm(c.size(0))
+            shuffled = c[rand_idx]
+            self.class_idxs[i] = shuffled
+            # added_len = self.max_len-shuffled.size(0)
+            # self.class_idxs[i] = torch.cat((shuffled,shuffled[0:added_len]))
+            self.class_idxs[i] = shuffled[0:self.min_len]
+
+        # interleave the shuffled lists so that every successive idx is a new class,
+        # to get even batches the batch size needs to be a multiple of the number of classes
+        # and we need an equal amount per class
+        zipped_idxs = torch.stack([t for t in self.class_idxs],dim=1)
+        return iter(zipped_idxs.view(zipped_idxs.numel()).tolist())
+    
+    def __len__(self):
+        return len(self.labels)
+    
 
 class DataframeToNumpy:
     def __init__(self):
@@ -284,17 +339,32 @@ def load_nvgesture(batch_size, rand_seed, root_dir, median_filter, augment_angle
     ])
 
     if subset != None:
-        dataset = Gestures(root_dir, None, train=True, subset=subset)
+        dataset = Gestures(root_dir[0], None, train=True, subset=subset)
         train_subset, val_subset = torch.utils.data.random_split(dataset, [int(len(dataset) * 0.9), len(dataset) - int(len(dataset) * .9)])
         train_set = SubsetWrapper(train_subset, transform=train_transforms)
         val_set = SubsetWrapper(val_subset, transform=test_transforms)
-        test_set = Gestures(root_dir, test_transforms, train=False, test=True, subset=subset)
+        test_set = Gestures(root_dir[0], test_transforms, train=False, test=True, subset=subset)
+        for rd in root_dir[1:]:
+            dataset = Gestures(rd, None, train=True, subset=subset)
+            train_subset, val_subset = torch.utils.data.random_split(dataset, [int(len(dataset) * 0.9), len(dataset) - int(len(dataset) * .9)])
+            
+            train_set = torch.utils.data.ConcatDataset([train_set,SubsetWrapper(train_subset, transform=train_transforms)])
+            val_set = torch.utils.data.ConcatDataset([val_set,SubsetWrapper(val_subset, transform=test_transforms)])
+            test_set = torch.utils.data.ConcatDataset([test_set,Gestures(rd, test_transforms, train=False, test=True, subset=subset)])
+            
     else:
-        dataset = Gestures(root_dir, None, train=True)
+        dataset = Gestures(root_dir[0], None, train=True)
         train_subset, val_subset = torch.utils.data.random_split(dataset, [int(len(dataset) * 0.9), len(dataset) - int(len(dataset) * .9)])
         train_set = SubsetWrapper(train_subset, transform=train_transforms)
         val_set = SubsetWrapper(val_subset, transform=test_transforms)
-        test_set = Gestures(root_dir, test_transforms, train=False, test=True)
+        test_set = Gestures(root_dir[0], test_transforms, train=False, test=True)
+        for rd in root_dir[1:]:
+            dataset = Gestures(rd, None, train=True, subset=subset)
+            train_subset, val_subset = torch.utils.data.random_split(dataset, [int(len(dataset) * 0.9), len(dataset) - int(len(dataset) * .9)])
+            
+            train_set = torch.utils.data.ConcatDataset([train_set,SubsetWrapper(train_subset, transform=train_transforms)])
+            val_set = torch.utils.data.ConcatDataset([val_set,SubsetWrapper(val_subset, transform=test_transforms)])
+            test_set = torch.utils.data.ConcatDataset([test_set,Gestures(rd, test_transforms, train=False, test=True)])
 
     # create the data loaders
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=varying_length_collate_fn)

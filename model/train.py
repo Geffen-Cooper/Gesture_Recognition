@@ -29,13 +29,13 @@ from models import *
 import time
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import optuna
-# from utils import utils
+from utils import utils
 
 np.set_printoptions(linewidth=np.nan)
 
 
 
-# @utils.ignore_unmatched_kwargs
+@utils.ignore_unmatched_kwargs
 def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,epochs,ese,lr,use_cuda,seed,subset, median_filter, augment_angles,
           model_type, model_hidden_dim_size_rnn, save_model_ckpt, model_hidden_dim_size_trans=None, model_num_layers_trans=None, model_num_heads_trans=None, model_lambda=None):
 
@@ -111,7 +111,6 @@ def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,epochs,ese
     else:
         best_val_acc = 0
         lowest_loss = 1e6
-
 
 
     # ================== training loop ==================
@@ -244,7 +243,7 @@ def generate_embeddings(test_loader,model,tb_writer,model_type,device,hidden_siz
     model.eval().to(device)
 
     # get batch from test loader
-    batch_imgs, batch_labels, _ = next(iter(test_loader))
+    batch_imgs, batch_labels, idxs = next(iter(test_loader))
     batch_imgs = batch_imgs.to(device)
 
     # store output embedding for each timestep, so we can average
@@ -268,9 +267,15 @@ def generate_embeddings(test_loader,model,tb_writer,model_type,device,hidden_siz
             embds = activation['emb'].squeeze(1).to('cpu')
 
             # get the labels
+            halfway = len(test_loader.dataset.datasets[0])
             batch_label_strings = []
             for idx,label in enumerate(batch_labels):
-                batch_label_strings.append(str(label.item()))
+                if idx >= halfway:
+                    dir = os.path.basename(Path(test_loader.dataset.datasets[1].img_paths[idx-halfway]).parents[1])
+                    batch_label_strings.append(str(label.item())+"_"+dir)
+                else:
+                    dir = os.path.basename(Path(test_loader.dataset.datasets[0].img_paths[idx-halfway]).parents[1])
+                    batch_label_strings.append(str(label.item())+"_"+dir)
 
             # store embeddings to tensorboard
             tb_writer.add_embedding(embds,metadata=batch_label_strings)
@@ -302,8 +307,8 @@ def generate_embeddings(test_loader,model,tb_writer,model_type,device,hidden_siz
 # ===================================== Main =====================================
 if __name__ == "__main__":
 
-    train_params = {'loss': "CE", 'from_checkpoint': None, 'optimizer': "AdamW", 'log_name': "collected", 'root_dir': "../csvs/collected_data",
-                    'batch_size': 64, 'epochs': 50, 'ese': 5, 'lr': 0.0015, 'use_cuda': True, 'seed': 42, 'subset': tuple(np.arange(25)), 'median_filter': False, 'augment_angles': True,
+    train_params = {'loss': "CE", 'from_checkpoint': None, 'optimizer': "AdamW", 'log_name': "collected", 'root_dir': ["../csvs/collected_data","../csvs/top"],
+                    'batch_size': 64, 'epochs': 50, 'ese': 1, 'lr': 0.002, 'use_cuda': True, 'seed': 42, 'subset': tuple(np.arange(25)), 'median_filter': False, 'augment_angles': True,
                     'model_type': "AttentionRNN", 'model_hidden_dim_size_rnn': 256, 'model_hidden_dim_size_trans': 276, 'save_model_ckpt': True,
                     'model_num_layers_trans': 1, 'model_num_heads_trans': 6}
 
