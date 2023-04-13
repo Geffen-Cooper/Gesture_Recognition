@@ -1,8 +1,9 @@
+import warnings
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from collections import defaultdict
-import logging
 
 
 # Create RNN Model
@@ -107,6 +108,7 @@ class RNNFeatureExtractor(nn.Module):
         self.embedder = nn.Linear(hidden_dim, latent_dim)
 
     def forward(self, x):
+        x = x.float()
         rnn_out, _ = self.rnn(x)
         if not self.rnn_use_last:
             rnn_mean = torch.mean(rnn_out, dim=1)
@@ -124,10 +126,11 @@ class CentroidModel(nn.Module):
         self.fe_model = RNNFeatureExtractor(input_dim=input_dim, hidden_dim=hidden_dim, latent_dim=latent_dim, layer_dim=layer_dim, rnn_type=rnn_type, rnn_use_last=rnn_use_last, device=device).to(device)
 
         if self.checkpoint_file:
-            logging.warning("Checkpoint not specified, loading untrained model!")
             checkpoint = torch.load(self.checkpoint_file)
             print(f"Loading RNNFeatureExtractor with epoch: {checkpoint['epoch']}, val_acc: {checkpoint['val_acc']}, val_loss: {checkpoint['val_loss']}")
             self.fe_model.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            warnings.warn("Checkpoint not specified, loading untrained model!")
 
         # Centroids
         self.centroids = defaultdict(lambda: torch.zeros(latent_dim).to(self.device))
@@ -140,20 +143,36 @@ class CentroidModel(nn.Module):
         return embeddings
 
     def forward(self, x):
+        if self.num_classes() <= 0:
+            return None
         embeddings = self.get_embeddings(x)
         centroids, class_nums = self.get_centroids_as_tensor()
         dists = self.euclidean_dist(embeddings, centroids)
         closest_class_idxs = dists.argmin(dim=1)
         decoded_class_nums = class_nums.to(self.device).gather(0, closest_class_idxs)
-        return decoded_class_nums
+        return decoded_class_nums, F.softmax(-dists, dim=1)
 
     def num_classes(self):
         return len(self.centroids)
+
+    def delete_centroid_if_exists(self, class_num):
+        if class_num in self.centroids:
+            del self.centroids[class_num]
+            del self.class_counts[class_num]
+            return class_num
+        else:
+            return None
 
     def learn_centroid(self, x, class_num):
         embeddings = self.get_embeddings(x)
         self.centroids[class_num] = (self.centroids[class_num] * self.class_counts[class_num] + embeddings.mean(dim=0)) / (self.class_counts[class_num] + embeddings.size(0))
         self.class_counts[class_num] += embeddings.size(0)
+
+    def _dont_call_this(self, x, class_num):
+        x = x.cuda()
+
+        self.centroids[class_num] = (self.centroids[class_num] * self.class_counts[class_num] + x.sum(dim=0)) / (self.class_counts[class_num] + x.size(0))
+        self.class_counts[class_num] += x.size(0)
 
     def get_centroids_as_tensor(self):
         """
@@ -169,7 +188,11 @@ class CentroidModel(nn.Module):
         class_num_lst = [x for x, _ in sorted_pairs]
         centroid_lst = [x for _, x in sorted_pairs]
 
-        return torch.stack(centroid_lst).squeeze(), torch.Tensor(class_num_lst)
+        centroids = torch.stack(centroid_lst)
+        if len(centroids.size()) > 2:
+            centroids = centroids.squeeze()
+
+        return centroids, torch.Tensor(class_num_lst).long()
 
 
     def euclidean_dist(self, x, y):
@@ -256,14 +279,15 @@ if __name__ == '__main__':
     print(model.get_embeddings(data))
 
     print()
-    data = torch.rand((200, 80, 63))
-    model.learn_centroid(data * 0.01, 0)
-    model.learn_centroid(data * 1, 1)
-    model.learn_centroid(data * 2, 2)
-    model.learn_centroid(data * 3, 3)
-    model.learn_centroid(data * 4, 4)
+    data = torch.rand((200, 10))
+    model._dont_call_this(data * 0, 0)
+    model._dont_call_this(data * 0 + 1, 1)
+    model._dont_call_this(data * 0 + 2, 2)
+    model._dont_call_this(data * 0 + 3, 3)
+    model._dont_call_this(data * 0 + 4, 4)
 
-    print(model.get_centroids_as_tensor())
+    centroids, vals = model.get_centroids_as_tensor()
+    print()
 
     data = torch.rand((200, 80, 63)) * 4
     print(model(data))

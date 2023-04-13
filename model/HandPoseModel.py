@@ -1,4 +1,5 @@
 import time
+import warnings
 
 import cv2
 import torch
@@ -7,7 +8,7 @@ import mediapipe as mp
 
 
 class HandPoseModel(nn.Module):
-    def __init__(self, filter_handedness=None, draw_pose=True, model_complexity=1, max_num_hands=2, min_detection_confidence=0.5, min_tracking_confidence=0.5, static_image_mode=True, *args, **kwargs):
+    def __init__(self, filter_handedness=None, draw_pose=True, model_complexity=1, max_num_hands=2, min_detection_confidence=0.5, min_tracking_confidence=0.5, video_mode=True, lm_type="n", *args, **kwargs):
         """
 
         Args:
@@ -16,7 +17,7 @@ class HandPoseModel(nn.Module):
             max_num_hands:
             min_detection_confidence:
             min_tracking_confidence:
-            static_image_mode:
+            video_mode:
         """
         # Load mediapipe handpose model
         super().__init__()
@@ -27,11 +28,16 @@ class HandPoseModel(nn.Module):
                                          max_num_hands=max_num_hands,
                                          min_detection_confidence=min_detection_confidence,
                                          min_tracking_confidence=min_tracking_confidence,
-                                         static_image_mode=static_image_mode)
+                                         static_image_mode=not video_mode)
 
         assert filter_handedness in (None, 'Left', 'Right'), "Invalid value for filter_handedness"
         self.filter_handedness = filter_handedness
         self.draw_pose = draw_pose
+
+        if lm_type == "n":
+            warnings.warn(f"Using lm_type n!")
+        assert lm_type in ("n", "w")
+        self.lm_type = lm_type
 
         # measure FPS
         self.last_frame_time = 0
@@ -52,8 +58,10 @@ class HandPoseModel(nn.Module):
         results = self.hands.process(image=image)
         result_vectors = []
 
-        if results.multi_hand_landmarks:
-            for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
+        hands_detected = results.multi_hand_landmarks is not None
+
+        if hands_detected:
+            for hand_landmarks, world_hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_hand_world_landmarks, results.multi_handedness):
 
                 # Annotate frame
                 if self.draw_pose:
@@ -73,18 +81,21 @@ class HandPoseModel(nn.Module):
 
                     # Only draw pose if correct hand or it becomes confusing
                     if self.draw_pose:
+                        image.flags.writeable = True
                         self.mp_drawing.draw_landmarks(
                             image,
                             hand_landmarks,
                             self.mp_hands.HAND_CONNECTIONS,
                             self.mp_drawing_styles.get_default_hand_landmarks_style(),
                             self.mp_drawing_styles.get_default_hand_connections_style())
-
+                        image.flags.writeable = False
                     # Convert landmarks into vector
                     lm_list_x = []
                     lm_list_y = []
                     lm_list_z = []
-                    for lm in hand_landmarks.landmark:
+
+                    landmarks_to_use = hand_landmarks if self.lm_type == "n" else world_hand_landmarks
+                    for lm in landmarks_to_use.landmark:
                         lm_list_x.append(lm.x)
                         lm_list_y.append(lm.y)
                         lm_list_z.append(lm.z)
