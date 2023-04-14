@@ -46,7 +46,7 @@ class RNNModel(torch.nn.Module):
 
 # Create RNN Model with attention
 class AttentionRNNModel(torch.nn.Module):
-    def __init__(self, input_dim, hidden_dim, layer_dim, output_dim, device):
+    def __init__(self, input_dim, hidden_dim, layer_dim, output_dim, device,fc=False):
         super(AttentionRNNModel, self).__init__()
 
         # Number of hidden dimensions
@@ -62,6 +62,11 @@ class AttentionRNNModel(torch.nn.Module):
 
         # attention
         self.attention = torch.nn.Linear(hidden_dim, 1)
+
+        if fc == True:
+            self.fc = torch.nn.Linear(hidden_dim,output_dim)
+        else:
+            self.fc = None
 
     def forward(self, x):
         # Initialize hidden state with zeros
@@ -84,7 +89,10 @@ class AttentionRNNModel(torch.nn.Module):
         for i in range(x.shape[0]):
             attended[i, :] = attention_weights[i] @ output[i, :, :]
 
-        return attended
+        if self.fc is not None:
+            return self.fc(attended)
+        else:
+            return attended
 
 
 class RNNFeatureExtractor(nn.Module):
