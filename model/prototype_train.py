@@ -221,7 +221,7 @@ if __name__ == '__main__':
 
         if params['augment_angles']:
             params["rot_aug_amt"] = trial.suggest_float("rot_aug_amt", np.pi / 16, np.pi / 3)
-            params["aug_renorm_origin"] = trial.suggest_categorical("aug_renorm_origin", [True, False])
+            params["aug_renorm_origin"] = True  # trial.suggest_categorical("aug_renorm_origin", [True, False])
             params["trans_aug_amt"] = 0
 
         params['save_model_ckpt'] = save_checkpoint
