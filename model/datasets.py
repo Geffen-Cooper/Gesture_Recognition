@@ -1,6 +1,6 @@
 import torch
 from torchvision import datasets, transforms
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -338,12 +338,23 @@ def load_nvgesture(batch_size, rand_seed, root_dir, median_filter, augment_angle
         ToTensor(),
     ])
 
+    
     if subset != None:
         dataset = Gestures(root_dir, None, train=True, subset=subset)
-        train_subset, val_subset = torch.utils.data.random_split(dataset, [int(len(dataset) * 0.9), len(dataset) - int(len(dataset) * .9)])
+        sampler = EvenSampler(dataset,shot=-1)
+        idxs = [idx for idx in sampler]
+        train_subset = Subset(dataset,idxs[:int(len(dataset) * 0.9)])
+        val_subset = Subset(dataset,idxs[int(len(dataset) * 0.9):])
+
+        # train_subset, val_subset = torch.utils.data.random_split(dataset, [int(len(dataset) * 0.9), len(dataset) - int(len(dataset) * .9)])
         train_set = SubsetWrapper(train_subset, transform=train_transforms)
         val_set = SubsetWrapper(val_subset, transform=test_transforms)
+
         test_set = Gestures(root_dir, test_transforms, train=False, test=True, subset=subset)
+        test_sampler = EvenSampler(test_set,shot=-1)
+        test_idxs = [idx for idx in test_sampler]
+        test_set = Subset(test_set,test_idxs)
+        
         # for rd in root_dir[1:]:
         #     dataset = Gestures(rd, None, train=True, subset=subset)
         #     train_subset, val_subset = torch.utils.data.random_split(dataset, [int(len(dataset) * 0.9), len(dataset) - int(len(dataset) * .9)])
@@ -354,10 +365,20 @@ def load_nvgesture(batch_size, rand_seed, root_dir, median_filter, augment_angle
             
     else:
         dataset = Gestures(root_dir, None, train=True)
-        train_subset, val_subset = torch.utils.data.random_split(dataset, [int(len(dataset) * 0.9), len(dataset) - int(len(dataset) * .9)])
+        sampler = EvenSampler(dataset,shot=-1)
+        idxs = [idx for idx in sampler]
+        train_subset = Subset(dataset,idxs[:int(len(dataset) * 0.9)])
+        val_subset = Subset(dataset,idxs[int(len(dataset) * 0.9):])
+
+        # train_subset, val_subset = torch.utils.data.random_split(dataset, [int(len(dataset) * 0.9), len(dataset) - int(len(dataset) * .9)])
         train_set = SubsetWrapper(train_subset, transform=train_transforms)
         val_set = SubsetWrapper(val_subset, transform=test_transforms)
+
         test_set = Gestures(root_dir, test_transforms, train=False, test=True)
+        test_sampler = EvenSampler(test_set,shot=-1)
+        test_idxs = [idx for idx in test_sampler]
+        test_set = Subset(test_set,test_idxs)
+        
         # for rd in root_dir[1:]:
         #     dataset = Gestures(rd, None, train=True, subset=subset)
         #     train_subset, val_subset = torch.utils.data.random_split(dataset, [int(len(dataset) * 0.9), len(dataset) - int(len(dataset) * .9)])

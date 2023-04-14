@@ -309,8 +309,8 @@ def generate_embeddings(test_loader,model,tb_writer,model_type,device,hidden_siz
 if __name__ == "__main__":
 
     train_params = {'loss': "CE", 'from_checkpoint': None, 'optimizer': "AdamW", 'log_name': "collected", 'root_dir': "../csvs/collected_data",
-                    'batch_size': 64, 'epochs': 50, 'ese': 10, 'lr': 0.0015, 'use_cuda': True, 'seed': 42, 'subset': tuple(np.arange(25)), 'median_filter': False, 'augment_angles': True,
-                    'model_type': "RNN", 'model_hidden_dim_size_rnn': 256, 'model_hidden_dim_size_trans': 276, 'save_model_ckpt': True,
+                    'batch_size': 64, 'epochs': 50, 'ese': 5, 'lr': 0.0015, 'use_cuda': True, 'seed': 42, 'subset': tuple(np.arange(25)), 'median_filter': False, 'augment_angles': True,
+                    'model_type': "AttentionRNN", 'model_hidden_dim_size_rnn': 256, 'model_hidden_dim_size_trans': 276, 'save_model_ckpt': True,
                     'model_num_layers_trans': 1, 'model_num_heads_trans': 6}
 
     train(**train_params)
