@@ -20,7 +20,7 @@ from utils.utils import ignore_unmatched_kwargs
 
 
 @ignore_unmatched_kwargs
-def train_prototype(loss_min_count=2, from_checkpoint=None, optimizer="AdamW", log_name="default", root_dir="ds", batch_size=128, epochs=200, ese=20, lr=1e-4, use_cuda=True, seed=42, subset=None, median_filter=False, augment_angles=False, model_type="RNN", model_params=None, save_model_ckpt=False):
+def train_prototype(loss_min_count=2, from_checkpoint=None, optimizer="AdamW", log_name="default", root_dir="ds", batch_size=128, epochs=200, ese=20, lr=1e-4, use_cuda=True, seed=42, subset=None, median_filter=False, augment_angles=False, model_type="RNN", model_params=None, save_model_ckpt=False, rot_aug_amt = np.pi/8, aug_renorm_origin=True, trans_aug_amt=0.1):
     if model_params is None:
         model_params = {}
     assert batch_size > 25
@@ -49,7 +49,7 @@ def train_prototype(loss_min_count=2, from_checkpoint=None, optimizer="AdamW", l
         device = torch.device("cpu")
 
     # load datasets
-    train_loader, val_loader, test_loader = load_nvgesture(batch_size, seed, root_dir=root_dir, subset=subset, median_filter=median_filter, augment_angles=augment_angles)
+    train_loader, val_loader, test_loader = load_nvgesture(batch_size, seed, root_dir=root_dir, subset=subset, median_filter=median_filter, augment_angles=augment_angles, rot_aug_amt=rot_aug_amt, aug_renorm_origin=aug_renorm_origin, trans_aug_amt=trans_aug_amt)
 
     # load the model
     if model_type == "RNN":
@@ -185,7 +185,7 @@ if __name__ == '__main__':
         model_params['input_dim'] = 63
         model_params['hidden_dim'] = trial.suggest_int('hidden_dim', 64, 400)  # 256
         model_params['latent_dim'] = trial.suggest_int('latent_dim', 10, 128)  # 64
-        model_params['layer_dim'] = trial.suggest_int('layer_dim', 1, 2)  # 1
+        model_params['layer_dim'] = 1  # trial.suggest_int('layer_dim', 1, 2)  # 1
         model_params['rnn_type'] = "AttentionRNN"  # trial.suggest_categorical('rnn_type', ["GRU", "LSTM"])
         model_params['rnn_use_last'] = False  # trial.suggest_categorical('rnn_use_last', [False, True])
         model_params['device'] = 'cuda'
@@ -200,7 +200,7 @@ if __name__ == '__main__':
 
         # Train params
         params = dict()
-        params['loss_min_count'] = trial.suggest_int('loss_min_count', 2, 4)
+        params['loss_min_count'] = 3 # trial.suggest_int('loss_min_count', 2, 4)
         params['from_checkpoint'] = None
         params['optimizer'] = trial.suggest_categorical('optimizer', ["AdamW", "Adam"])
         params['log_name'] = f"proto_{trial.number}" if log_name is None else log_name
@@ -208,16 +208,22 @@ if __name__ == '__main__':
         # params['root_dir'] = f"../csvs/{ds_name}"
         params['root_dir'] = f"../csvs/collected_data"
 
-        params['batch_size'] = trial.suggest_int('batch_size', 100, 256)
+        params['batch_size'] = trial.suggest_int('batch_size', 110, 160)
         params['epochs'] = 400
         params['ese'] = 20
-        params['lr'] = trial.suggest_float('lr', 1e-3, 1e-2)
+        params['lr'] = trial.suggest_float('lr', 0.001, 0.006)
         params['use_cuda'] = True
         params['seed'] = 42
         params['subset'] = None
         params['model_params'] = model_params
         params['median_filter'] = False
-        params['augment_angles'] = trial.suggest_categorical('augment_angles', [True, False]) if lm_type != 'wp' else False
+        params['augment_angles'] = True # trial.suggest_categorical('augment_angles', [True, False]) if lm_type != 'wp' else False
+
+        if params['augment_angles']:
+            params["rot_aug_amt"] = trial.suggest_float("rot_aug_amt", np.pi / 16, np.pi / 3)
+            params["aug_renorm_origin"] = trial.suggest_categorical("aug_renorm_origin", [True, False])
+            params["trans_aug_amt"] = 0
+
         params['save_model_ckpt'] = save_checkpoint
 
         params['lm_type'] = lm_type
@@ -249,7 +255,7 @@ if __name__ == '__main__':
     database = "db1"
     ######################
 
-    STUDY_NAME = "attention_rnn_new_ds_v0"
+    STUDY_NAME = "attention_rnn_new_ds_v1"
 
     storage = optuna.storages.RDBStorage(
         # url="sqlite:///:memory:",
@@ -297,13 +303,16 @@ if __name__ == '__main__':
     # #                  "video_mode": 1}
     # # optuna_params = {"augment_angles": True, "batch_size": 192, "hidden_dim": 103, "latent_dim": 61, "layer_dim": 1, "lm_type": "w", "loss_min_count": 4, "lr": 0.002695153477672442, "optimizer": "Adam", "resolution_method": "f", "rnn_type": "GRU", "use_clahe": 0, "video_mode": 1, 'rnn_use_last': False}
     #
-    # optuna_params = {"batch_size": 149, "hidden_dim": 393, "latent_dim": 76, "layer_dim": 2, "lm_type": "wp", "loss_min_count": 2, "lr": 0.0016366085062888454, "optimizer": "Adam", "resolution_method": "z", "rnn_type": "GRU", "rnn_use_last": True, "use_clahe": 1, "video_mode": 0}
+    # # optuna_params = {"batch_size": 149, "hidden_dim": 393, "latent_dim": 76, "layer_dim": 2, "lm_type": "wp", "loss_min_count": 2, "lr": 0.0016366085062888454, "optimizer": "Adam", "resolution_method": "z", "rnn_type": "GRU", "rnn_use_last": True, "use_clahe": 1, "video_mode": 0}
+    #
+    # optuna_params = {'augment_angles': True, 'batch_size': 150, 'hidden_dim': 393, 'latent_dim': 43, 'layer_dim': 1, 'loss_min_count': 3, 'lr': 0.003, 'optimizer': 'AdamW'}
+    #
     #
     # fake_trial = FakeTrial(optuna_params)
     #
-    # params = suggest_params(fake_trial, save_checkpoint=True, log_name="ProtomodelTrain3")
+    # params = suggest_params(fake_trial, save_checkpoint=True, log_name="ProtomodelAttentionRNNv0")
     #
-    # with open(f"models/protomodel_params3.json", "w") as f:
+    # with open(f"models/ProtomodelAttentionRNNv0_params.json", "w") as f:
     #     json.dump(params, f)
     # print(params)
     # print("=========================================")

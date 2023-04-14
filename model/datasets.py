@@ -321,10 +321,10 @@ def varying_length_collate_fn(sample_tuples):
 
 
 
-def load_nvgesture(batch_size, rand_seed, root_dir, median_filter, augment_angles, subset=None):
+def load_nvgesture(batch_size, rand_seed, root_dir, median_filter, augment_angles, subset=None, rot_aug_amt = np.pi/8, aug_renorm_origin=True, trans_aug_amt=0.1):
     tsfm_lst = []
     if augment_angles:
-        tsfm_lst.append(RotateAngles(rot_x=np.pi / 8, rot_y=np.pi / 8, rot_z=np.pi / 8, trans_x=0.1, trans_y=0.1, trans_z=0.1, renormalize_origin=True))
+        tsfm_lst.append(RotateAngles(rot_x=rot_aug_amt, rot_y=rot_aug_amt, rot_z=rot_aug_amt, trans_x=trans_aug_amt, trans_y=trans_aug_amt, trans_z=trans_aug_amt, renormalize_origin=aug_renorm_origin))
     tsfm_lst.extend([
         DataframeToNumpy(),
         NormalizeAndFilter(median_filter=median_filter),

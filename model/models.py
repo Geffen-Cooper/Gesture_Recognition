@@ -46,7 +46,7 @@ class RNNModel(torch.nn.Module):
 
 # Create RNN Model with attention
 class AttentionRNNModel(torch.nn.Module):
-    def __init__(self, input_dim, hidden_dim, layer_dim, output_dim, device,fc=False):
+    def __init__(self, input_dim, hidden_dim, layer_dim, output_dim, device, fc=False):
         super(AttentionRNNModel, self).__init__()
 
         # Number of hidden dimensions
@@ -64,7 +64,7 @@ class AttentionRNNModel(torch.nn.Module):
         self.attention = torch.nn.Linear(hidden_dim, 1)
 
         if fc == True:
-            self.fc = torch.nn.Linear(hidden_dim,output_dim)
+            self.fc = torch.nn.Linear(hidden_dim, output_dim)
         else:
             self.fc = None
 
@@ -117,7 +117,7 @@ class RNNFeatureExtractor(nn.Module):
         elif rnn_type == "LSTM":
             self.rnn = nn.LSTM(input_size=input_dim, hidden_size=hidden_dim, num_layers=layer_dim, batch_first=True)
         elif rnn_type == "AttentionRNN":
-            self.rnn = AttentionRNNModel(input_dim, hidden_dim, layer_dim, latent_dim, device)
+            self.rnn = AttentionRNNModel(input_dim, hidden_dim, layer_dim, latent_dim, device, fc=False)
         else:
             raise NotImplementedError()
         self.embedder = nn.Linear(hidden_dim, latent_dim)
