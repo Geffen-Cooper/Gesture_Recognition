@@ -186,25 +186,28 @@ if __name__ == '__main__':
         model_params['hidden_dim'] = trial.suggest_int('hidden_dim', 64, 400)  # 256
         model_params['latent_dim'] = trial.suggest_int('latent_dim', 10, 128)  # 64
         model_params['layer_dim'] = trial.suggest_int('layer_dim', 1, 2)  # 1
-        model_params['rnn_type'] = trial.suggest_categorical('rnn_type', ["GRU", "LSTM"])
-        model_params['rnn_use_last'] = trial.suggest_categorical('rnn_use_last', [False, True])
+        model_params['rnn_type'] = "AttentionRNN"  # trial.suggest_categorical('rnn_type', ["GRU", "LSTM"])
+        model_params['rnn_use_last'] = False  # trial.suggest_categorical('rnn_use_last', [False, True])
         model_params['device'] = 'cuda'
 
         # Datasets
-        lm_type = trial.suggest_categorical("lm_type", ['n', 'wp', 'w'])
+        lm_type = "n"  # trial.suggest_categorical("lm_type", ['n', 'wp', 'w'])
         sensor = "c"
-        use_clahe = trial.suggest_categorical("use_clahe", [0, 1])
-        video_mode = trial.suggest_categorical("video_mode", [0, 1])
-        resolution_method = trial.suggest_categorical("resolution_method", ['z', 'f'])  # ['i', 'z', 'f']
+        use_clahe = 0  # trial.suggest_categorical("use_clahe", [0, 1])
+        video_mode = 1  # trial.suggest_categorical("video_mode", [0, 1])
+        resolution_method = "z"  # trial.suggest_categorical("resolution_method", ['z', 'f'])  # ['i', 'z', 'f']
         ds_name = f"ds_L{lm_type}_S{sensor}_C{use_clahe}_V{video_mode}_R{resolution_method}"
 
         # Train params
         params = dict()
         params['loss_min_count'] = trial.suggest_int('loss_min_count', 2, 4)
         params['from_checkpoint'] = None
-        params['optimizer'] = trial.suggest_categorical('optimizer', ["AdamW", "Adam", "SGD"])
+        params['optimizer'] = trial.suggest_categorical('optimizer', ["AdamW", "Adam"])
         params['log_name'] = f"proto_{trial.number}" if log_name is None else log_name
-        params['root_dir'] = f"../csvs/{ds_name}"
+
+        # params['root_dir'] = f"../csvs/{ds_name}"
+        params['root_dir'] = f"../csvs/collected_data"
+
         params['batch_size'] = trial.suggest_int('batch_size', 100, 256)
         params['epochs'] = 400
         params['ese'] = 20
@@ -212,7 +215,6 @@ if __name__ == '__main__':
         params['use_cuda'] = True
         params['seed'] = 42
         params['subset'] = None
-        params['model_type'] = "RNN"
         params['model_params'] = model_params
         params['median_filter'] = False
         params['augment_angles'] = trial.suggest_categorical('augment_angles', [True, False]) if lm_type != 'wp' else False
@@ -226,85 +228,85 @@ if __name__ == '__main__':
         return params
 
 
-    # def objective(trial):
-    #     params = suggest_params(trial)
-    #     try:
-    #         test_acc, test_loss = train_prototype(**params)
-    #         torch.cuda.empty_cache()
-    #     except Exception as e:
-    #         for i in range(10):
-    #             print()
-    #         logger = logging.getLogger()
-    #         logger.setLevel(logging.DEBUG)
-    #         logger.error(str(e), exc_info=True)
-    #         return float('nan')
-    #     return test_loss, test_acc
+    def objective(trial):
+        params = suggest_params(trial)
+        try:
+            test_acc, test_loss = train_prototype(**params)
+            torch.cuda.empty_cache()
+        except Exception as e:
+            for i in range(10):
+                print()
+            logger = logging.getLogger()
+            logger.setLevel(logging.DEBUG)
+            logger.error(str(e), exc_info=True)
+            return float('nan')
+        return test_loss, test_acc
+
+    ##### SQL Server #####
+    user = "admin"
+    password = "plzdonthackme"
+    url = "optuna.czje4evrsrqy.us-east-2.rds.amazonaws.com"
+    database = "db1"
+    ######################
+
+    STUDY_NAME = "attention_rnn_new_ds_v0"
+
+    storage = optuna.storages.RDBStorage(
+        # url="sqlite:///:memory:",
+        url=f"mysql://{user}:{password}@{url}/{database}",
+        heartbeat_interval=60,
+        grace_period=120,
+        failed_trial_callback=RetryFailedTrialCallback(max_retry=3),
+    )
+
+    print(f"SQL URL: mysql://{user}:{password}@{url}/{database}")
+    print()
+
+    sampler = optuna.samplers.TPESampler(multivariate=True, group=True, constant_liar=True)
+    study = optuna.create_study(study_name=STUDY_NAME, sampler=sampler, storage=storage, load_if_exists=True, directions=['minimize', 'maximize'])
+    study.optimize(objective, timeout=3600 * 10, gc_after_trial=True)
+
+    # class FakeTrial:
+    #     def __init__(self, params):
+    #         super(FakeTrial, self).__init__()
+    #         self.found_params = params
     #
-    # ##### SQL Server #####
-    # user = "admin"
-    # password = "plzdonthackme"
-    # url = "optuna.czje4evrsrqy.us-east-2.rds.amazonaws.com"
-    # database = "db1"
-    # ######################
+    #     def get_param(self, name):
+    #         return self.found_params[name]
     #
-    # STUDY_NAME = "prototype_study_v0"
+    #     def suggest_float(self, name: str, low: float, high: float, *, step: Optional[float] = None, log: bool = False) -> float:
+    #         return self.get_param(name)
     #
-    # storage = optuna.storages.RDBStorage(
-    #     # url="sqlite:///:memory:",
-    #     url=f"mysql://{user}:{password}@{url}/{database}",
-    #     heartbeat_interval=60,
-    #     grace_period=120,
-    #     failed_trial_callback=RetryFailedTrialCallback(max_retry=3),
-    # )
+    #     def suggest_uniform(self, name: str, low: float, high: float) -> float:
+    #         return self.get_param(name)
     #
-    # print(f"SQL URL: mysql://{user}:{password}@{url}/{database}")
-    # print()
+    #     def suggest_loguniform(self, name: str, low: float, high: float) -> float:
+    #         return self.get_param(name)
     #
-    # sampler = optuna.samplers.TPESampler(multivariate=True, group=True, constant_liar=True)
-    # study = optuna.create_study(study_name=STUDY_NAME, sampler=sampler, storage=storage, load_if_exists=True, directions=['minimize', 'maximize'])
-    # study.optimize(objective, timeout=3600 * 10, gc_after_trial=True)
-
-    class FakeTrial:
-        def __init__(self, params):
-            super(FakeTrial, self).__init__()
-            self.found_params = params
-
-        def get_param(self, name):
-            return self.found_params[name]
-
-        def suggest_float(self, name: str, low: float, high: float, *, step: Optional[float] = None, log: bool = False) -> float:
-            return self.get_param(name)
-
-        def suggest_uniform(self, name: str, low: float, high: float) -> float:
-            return self.get_param(name)
-
-        def suggest_loguniform(self, name: str, low: float, high: float) -> float:
-            return self.get_param(name)
-
-        def suggest_discrete_uniform(self, name: str, low: float, high: float, q: float) -> float:
-            return self.get_param(name)
-
-        def suggest_int(self, name: str, low: int, high: int, step: int = 1, log: bool = False) -> int:
-            return self.get_param(name)
-
-        def suggest_categorical(self, name, choices):
-            return self.get_param(name)
-
-
-    # optuna_params = {"augment_angles": True, "batch_size": 245, "hidden_dim": 318, "latent_dim": 13, "layer_dim": 2, "lm_type": "w", "loss_min_count": 4, "lr": 0.008017771856893249, "optimizer": "Adam", "resolution_method": "f", "rnn_type": "LSTM", "rnn_use_last": False, "use_clahe": 0,
-    #                  "video_mode": 1}
-    # optuna_params = {"augment_angles": True, "batch_size": 192, "hidden_dim": 103, "latent_dim": 61, "layer_dim": 1, "lm_type": "w", "loss_min_count": 4, "lr": 0.002695153477672442, "optimizer": "Adam", "resolution_method": "f", "rnn_type": "GRU", "use_clahe": 0, "video_mode": 1, 'rnn_use_last': False}
-
-    optuna_params = {"batch_size": 149, "hidden_dim": 393, "latent_dim": 76, "layer_dim": 2, "lm_type": "wp", "loss_min_count": 2, "lr": 0.0016366085062888454, "optimizer": "Adam", "resolution_method": "z", "rnn_type": "GRU", "rnn_use_last": True, "use_clahe": 1, "video_mode": 0}
-
-    fake_trial = FakeTrial(optuna_params)
-
-    params = suggest_params(fake_trial, save_checkpoint=True, log_name="ProtomodelTrain3")
-
-    with open(f"models/protomodel_params3.json", "w") as f:
-        json.dump(params, f)
-    print(params)
-    print("=========================================")
-
-    test_acc, test_loss = train_prototype(**params)
-    print(test_acc, test_loss)
+    #     def suggest_discrete_uniform(self, name: str, low: float, high: float, q: float) -> float:
+    #         return self.get_param(name)
+    #
+    #     def suggest_int(self, name: str, low: int, high: int, step: int = 1, log: bool = False) -> int:
+    #         return self.get_param(name)
+    #
+    #     def suggest_categorical(self, name, choices):
+    #         return self.get_param(name)
+    #
+    #
+    # # optuna_params = {"augment_angles": True, "batch_size": 245, "hidden_dim": 318, "latent_dim": 13, "layer_dim": 2, "lm_type": "w", "loss_min_count": 4, "lr": 0.008017771856893249, "optimizer": "Adam", "resolution_method": "f", "rnn_type": "LSTM", "rnn_use_last": False, "use_clahe": 0,
+    # #                  "video_mode": 1}
+    # # optuna_params = {"augment_angles": True, "batch_size": 192, "hidden_dim": 103, "latent_dim": 61, "layer_dim": 1, "lm_type": "w", "loss_min_count": 4, "lr": 0.002695153477672442, "optimizer": "Adam", "resolution_method": "f", "rnn_type": "GRU", "use_clahe": 0, "video_mode": 1, 'rnn_use_last': False}
+    #
+    # optuna_params = {"batch_size": 149, "hidden_dim": 393, "latent_dim": 76, "layer_dim": 2, "lm_type": "wp", "loss_min_count": 2, "lr": 0.0016366085062888454, "optimizer": "Adam", "resolution_method": "z", "rnn_type": "GRU", "rnn_use_last": True, "use_clahe": 1, "video_mode": 0}
+    #
+    # fake_trial = FakeTrial(optuna_params)
+    #
+    # params = suggest_params(fake_trial, save_checkpoint=True, log_name="ProtomodelTrain3")
+    #
+    # with open(f"models/protomodel_params3.json", "w") as f:
+    #     json.dump(params, f)
+    # print(params)
+    # print("=========================================")
+    #
+    # test_acc, test_loss = train_prototype(**params)
+    # print(test_acc, test_loss)
