@@ -63,9 +63,6 @@ class AttentionRNNModel(torch.nn.Module):
         # attention
         self.attention = torch.nn.Linear(hidden_dim, 1)
 
-        # Readout layer
-        self.fc = torch.nn.Linear(hidden_dim, output_dim)
-
     def forward(self, x):
         # Initialize hidden state with zeros
         h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim).to(self.device)
@@ -87,7 +84,7 @@ class AttentionRNNModel(torch.nn.Module):
         for i in range(x.shape[0]):
             attended[i, :] = attention_weights[i] @ output[i, :, :]
 
-        return self.fc(attended)
+        return attended
 
 
 class RNNFeatureExtractor(nn.Module):
@@ -104,21 +101,30 @@ class RNNFeatureExtractor(nn.Module):
         self.rnn_use_last = rnn_use_last
 
         self.device = device
+        self.rnn_type = rnn_type
 
         # RNN
         if rnn_type == "GRU":
             self.rnn = nn.GRU(input_size=input_dim, hidden_size=hidden_dim, num_layers=layer_dim, batch_first=True)
         elif rnn_type == "LSTM":
             self.rnn = nn.LSTM(input_size=input_dim, hidden_size=hidden_dim, num_layers=layer_dim, batch_first=True)
+        elif rnn_type == "AttentionRNN":
+            self.rnn = AttentionRNNModel(input_dim, hidden_dim, layer_dim, latent_dim, device)
+        else:
+            raise NotImplementedError()
         self.embedder = nn.Linear(hidden_dim, latent_dim)
 
     def forward(self, x):
         x = x.float()
-        rnn_out, _ = self.rnn(x)
-        if not self.rnn_use_last:
-            rnn_mean = torch.mean(rnn_out, dim=1)
+        if self.rnn_type != "AttentionRNN":
+            rnn_out, _ = self.rnn(x)
+            if not self.rnn_use_last:
+                rnn_mean = torch.mean(rnn_out, dim=1)
+            else:
+                rnn_mean = rnn_out[:, -1, :]
         else:
-            rnn_mean = rnn_out[:, -1, :]
+            rnn_mean = self.rnn(x)
+
         output = self.embedder(rnn_mean)
         return output
 
