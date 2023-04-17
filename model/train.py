@@ -70,8 +70,11 @@ def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,epochs,ese
         model_params = dict(input_dim=63, hidden_dim=model_hidden_dim_size_rnn, layer_dim=1, output_dim=25, device=device)
         model = RNNModel(**model_params).to(device)
     elif model_type == "AttentionRNN":
-        model_params = dict(input_dim=63, hidden_dim=model_hidden_dim_size_rnn, layer_dim=1, output_dim=25, device=device,fc=True)
-        model = AttentionRNNModel(**model_params).to(device)
+        model_params = dict(input_dim=63, hidden_dim=model_hidden_dim_size_rnn, layer_dim=1, output_dim=25, device=device,fc=False)
+        model = ModelWrapper(**model_params).to(device)
+    elif model_type == "ModelWrapper":
+        model_params = dict(input_dim=63, hidden_dim=model_hidden_dim_size_rnn, layer_dim=1, device=device, latent_dim=256, rnn_type="AttentionRNN", rnn_use_last=False)
+        model = ModelWrapper(**model_params).to(device)
     elif model_type == "Transformer":
         model_params = dict(input_dim=63, num_classes=25, num_heads=model_num_heads_trans, hidden_dim=model_hidden_dim_size_trans, num_layers=model_num_layers_trans)
         model = TransformerClassifier(**model_params).to(device)
@@ -202,7 +205,7 @@ def train(loss,from_checkpoint,optimizer,log_name,root_dir,batch_size,epochs,ese
 
     print("Generate Embeddings")
     hidden_size = model_hidden_dim_size_rnn if (model_type == "RNN" or model_type == "AttentionRNN") else model_hidden_dim_size_trans
-    generate_embeddings(test_loader,model,writer,model_type,device,hidden_size)
+    # generate_embeddings(test_loader,model,writer,model_type,device,hidden_size)
 
     return test_acc, test_loss
 
@@ -312,5 +315,5 @@ if __name__ == "__main__":
                     'batch_size': 64, 'epochs': 50, 'ese': 5, 'lr': 0.0015, 'use_cuda': True, 'seed': 42, 'subset': tuple(np.arange(25)), 'median_filter': False, 'augment_angles': True,
                     'model_type': "AttentionRNN", 'model_hidden_dim_size_rnn': 256, 'model_hidden_dim_size_trans': 276, 'save_model_ckpt': True,
                     'model_num_layers_trans': 1, 'model_num_heads_trans': 6}
-
+    train_params['model_type'] = "ModelWrapper"
     train(**train_params)

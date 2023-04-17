@@ -93,6 +93,19 @@ class AttentionRNNModel(torch.nn.Module):
             return self.fc(attended)
         else:
             return attended
+class ModelWrapper(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super(ModelWrapper, self).__init__()
+        self.fc = nn.LazyLinear(25)
+        self.model = RNNFeatureExtractor(*args, **kwargs)
+        self.fc.to(self.model.device)
+    def forward(self, x):
+        x = self.model(x)
+        x = self.fc(x)
+        return x
+
+    def state_dict(self):
+        return self.model.state_dict()
 
 
 class RNNFeatureExtractor(nn.Module):
@@ -187,7 +200,7 @@ class SklearnModel(FewShotModel):
 
         assert model is not None
         self.model = model
-        self.model_invalid = True
+        self.model_invalid = False
         self.data_by_class = {}
         self.class_idx2class_num = {}
 

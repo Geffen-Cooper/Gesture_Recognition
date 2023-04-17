@@ -138,7 +138,7 @@ class AttentionRNNModel(torch.nn.Module):
     
 # load the model
 model = AttentionRNNModel(63,256,1,25,'cpu')
-model.load_state_dict(torch.load("model.pth",map_location=torch.device('cpu'))['model_state_dict'])
+model.load_state_dict(torch.load("models/collected.pth",map_location=torch.device('cpu'))['model_state_dict'])
 model.eval()
 
 # initialize the capture object

@@ -88,7 +88,7 @@ class GestureControlMain(QMainWindow):
         self.median_filter = None
 
         self.few_shot_model: FewShotModel = None
-        self.setup_fewshot_model("assets/ProtomodelTrain3.pth", "assets/protomodel_params3.json")
+        self.setup_fewshot_model("assets/AttentionRegObjective.pth", "assets/AttentionRegObjective.json")
         self.transforms = transforms.Compose([DataframeToNumpy(), NormalizeAndFilter(median_filter=self.median_filter), ToTensor()])
 
         self.handpose_model = HandPoseModel(filter_handedness='Right', draw_pose=True, video_mode=self.video_mode, lm_type=self.lm_type)
@@ -196,7 +196,9 @@ class GestureControlMain(QMainWindow):
 
     def classify_gesture(self):
         print(f"Classifying gesture of length: {self.gesture_len()}")
-        pred_gesture, pred_proba = self.few_shot_model(torch.unsqueeze(self.transforms(self.gesture_hist), dim=0))
+        pred_gesture, pred_proba = None, None
+        if self.few_shot_model.num_classes() > 0:
+            pred_gesture, pred_proba = self.few_shot_model(torch.unsqueeze(self.transforms(self.gesture_hist), dim=0))
         return (pred_gesture.item(), pred_proba) if pred_gesture is not None else (None, None)
 
     def handle_save_sample(self, dataset_path):
